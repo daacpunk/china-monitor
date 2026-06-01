@@ -1,0 +1,173 @@
+import {
+  pgTable,
+  text,
+  integer,
+  serial,
+  timestamp,
+  jsonb,
+  boolean,
+  doublePrecision,
+  index,
+} from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Keys — masked storage of CEIC / Sonar Pro / Anthropic / DeepSeek keys
+// Keys are stored raw (Railway env or DB). User can re-paste anytime.
+// ─────────────────────────────────────────────────────────────────────────────
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  service: text("service").notNull().unique(), // 'ceic' | 'sonar' | 'anthropic' | 'deepseek'
+  apiKey: text("api_key").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastTestedAt: timestamp("last_tested_at"),
+  testStatus: text("test_status"), // 'ok' | 'fail' | null
+  testMessage: text("test_message"),
+});
+
+export const insertApiKeySchema = createInsertSchema(apiKeys).pick({
+  service: true,
+  apiKey: true,
+});
+export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
+export type ApiKey = typeof apiKeys.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings — global key/value store (TTLs, default landing, theme)
+// ─────────────────────────────────────────────────────────────────────────────
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  valueJson: jsonb("value_json").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertSettingSchema = createInsertSchema(settings).pick({
+  key: true,
+  valueJson: true,
+});
+export type InsertSetting = z.infer<typeof insertSettingSchema>;
+export type Setting = typeof settings.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Series cache — payloads from CEIC / Sonar with TTL
+// ─────────────────────────────────────────────────────────────────────────────
+export const seriesCache = pgTable(
+  "series_cache",
+  {
+    cacheKey: text("cache_key").primaryKey(),
+    payloadJson: jsonb("payload_json").notNull(),
+    fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    source: text("source").notNull(), // 'ceic' | 'sonar' | 'yahoo' | 'stooq' | 'free'
+  },
+  (t) => ({
+    expiresIdx: index("series_cache_expires_idx").on(t.expiresAt),
+  }),
+);
+export type SeriesCache = typeof seriesCache.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API call log — every paid call gets a row. Drives audit trail.
+// ─────────────────────────────────────────────────────────────────────────────
+export const apiCallLog = pgTable(
+  "api_call_log",
+  {
+    id: serial("id").primaryKey(),
+    ts: timestamp("ts").notNull().defaultNow(),
+    service: text("service").notNull(), // 'ceic' | 'sonar' | 'anthropic' | 'deepseek'
+    endpoint: text("endpoint").notNull(), // e.g. '/series', 'messages', 'chat/completions'
+    actionContext: text("action_context"), // e.g. 'kshape_chart', 'fai_section', 'series_explorer'
+    model: text("model"), // e.g. 'claude-sonnet-4', 'sonar-pro'
+    tokensIn: integer("tokens_in").default(0),
+    tokensOut: integer("tokens_out").default(0),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    status: text("status").notNull(), // 'ok' | 'error' | 'blocked_by_ceiling'
+    latencyMs: integer("latency_ms"),
+    errorMessage: text("error_message"),
+  },
+  (t) => ({
+    tsIdx: index("api_call_log_ts_idx").on(t.ts),
+    serviceIdx: index("api_call_log_service_idx").on(t.service),
+    contextIdx: index("api_call_log_context_idx").on(t.actionContext),
+  }),
+);
+
+export const insertApiCallLogSchema = createInsertSchema(apiCallLog).omit({
+  id: true,
+  ts: true,
+});
+export type InsertApiCallLog = z.infer<typeof insertApiCallLogSchema>;
+export type ApiCallLog = typeof apiCallLog.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cost ceilings — per-service monthly $ caps + CEIC call cap
+// ─────────────────────────────────────────────────────────────────────────────
+export const costCeilings = pgTable("cost_ceilings", {
+  service: text("service").primaryKey(), // 'ceic' | 'sonar' | 'anthropic' | 'deepseek'
+  monthlyLimitUsd: doublePrecision("monthly_limit_usd").notNull().default(20),
+  currentMonthUsd: doublePrecision("current_month_usd").notNull().default(0),
+  hardStopEnabled: boolean("hard_stop_enabled").notNull().default(true),
+  // CEIC-specific: monthly API call cap (raw call count, not $)
+  monthlyCallCap: integer("monthly_call_cap"),
+  currentMonthCalls: integer("current_month_calls").notNull().default(0),
+  monthAnchor: text("month_anchor").notNull().default(""), // 'YYYY-MM' for rollover detection
+});
+
+export const insertCostCeilingSchema = createInsertSchema(costCeilings);
+export type InsertCostCeiling = z.infer<typeof insertCostCeilingSchema>;
+export type CostCeiling = typeof costCeilings.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Watchlists — Phase 3 (schema only in Phase 1)
+// ─────────────────────────────────────────────────────────────────────────────
+export const watchlists = pgTable("watchlists", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  seriesIdsJson: jsonb("series_ids_json").notNull(), // string[]
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertWatchlistSchema = createInsertSchema(watchlists).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertWatchlist = z.infer<typeof insertWatchlistSchema>;
+export type Watchlist = typeof watchlists.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chart configs — Phase 3 (schema only in Phase 1)
+// ─────────────────────────────────────────────────────────────────────────────
+export const chartConfigs = pgTable("chart_configs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  configJson: jsonb("config_json").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertChartConfigSchema = createInsertSchema(chartConfigs).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertChartConfig = z.infer<typeof insertChartConfigSchema>;
+export type ChartConfig = typeof chartConfigs.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// View state — theme, last section, sidebar collapse, etc.
+// Persisted server-side (no localStorage in sandbox)
+// ─────────────────────────────────────────────────────────────────────────────
+export const viewState = pgTable("view_state", {
+  key: text("key").primaryKey(),
+  valueJson: jsonb("value_json").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertViewStateSchema = createInsertSchema(viewState).pick({
+  key: true,
+  valueJson: true,
+});
+export type InsertViewState = z.infer<typeof insertViewStateSchema>;
+export type ViewState = typeof viewState.$inferSelect;
