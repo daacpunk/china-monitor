@@ -1,12 +1,76 @@
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
-import { ProvenanceChip } from "@/components/ProvenanceChip";
+import { ProvenanceChip, ProvenanceChipLive } from "@/components/ProvenanceChip";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
-import { DATA, LAST_UPDATED } from "@/data/staticData";
+import { DATA } from "@/data/staticData";
+import { useSeries, getLatestValue } from "@/hooks/useSeries";
+
+function LiveStatCard({
+  label,
+  logicalId,
+  unit,
+  hint,
+  tone,
+  suffix = "%",
+  invertTone = false,
+}: {
+  label: string;
+  logicalId: string;
+  unit?: string;
+  hint?: string;
+  tone?: "good" | "bad" | "neutral";
+  suffix?: string;
+  invertTone?: boolean;
+}) {
+  const { data, provenance, isLoading, isError } = useSeries(logicalId) as any;
+
+  if (isLoading) {
+    return (
+      <div className="border rounded-lg p-4 bg-card">
+        <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">{label}</div>
+        <Skeleton className="h-8 w-24 mb-1" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+    );
+  }
+
+  const latest = getLatestValue(data);
+  const v = latest.value;
+  const hasData = v !== null;
+
+  const computedTone = tone ?? (
+    hasData
+      ? invertTone
+        ? v! < 0 ? "good" : v! > 0 ? "bad" : "neutral"
+        : v! > 0 ? "good" : v! < 0 ? "bad" : "neutral"
+      : "neutral"
+  );
+
+  const displayVal = hasData ? `${v! > 0 ? "+" : ""}${v!.toFixed(1)}${suffix}` : "—";
+  const deltaText = latest.date ? `${latest.date}` : isError ? "couldn't load — using static" : "";
+
+  return (
+    <StatCard
+      label={label}
+      value={displayVal}
+      delta={deltaText}
+      hint={hint}
+      tone={hasData ? computedTone : "neutral"}
+    />
+  );
+}
 
 export default function Overview() {
+  const faiFull = useSeries("fai_total_ytd") as any;
+  const ppi = useSeries("ppi_yoy") as any;
+  const faiRE = useSeries("fai_real_estate_ytd") as any;
+  const faiHT = useSeries("fai_hitech_ytd") as any;
+
+  const prov = ppi.data?.provenance;
+
   return (
     <div data-testid="page-overview">
       <PageHeader
@@ -14,38 +78,44 @@ export default function Overview() {
         subtitle="Old-economy vs new-economy K-shape monitor — built for institutional investment research."
         meta={
           <>
-            <ProvenanceChip type="static" detail={`Last static refresh: ${LAST_UPDATED}`} />
-            <Badge variant="outline" className="font-normal">Phase 1 · static data</Badge>
-            <Badge variant="outline" className="font-normal">Live data wires in Phase 2</Badge>
+            {prov ? (
+              <ProvenanceChipLive
+                source={prov.source}
+                lastUpdated={prov.lastUpdated}
+                cacheHit={prov.cacheHit}
+              />
+            ) : (
+              <ProvenanceChip type="static" detail="Static fallback" />
+            )}
+            <Badge variant="outline" className="font-normal">Phase 2 · live data</Badge>
           </>
         }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          label="FAI 2026Q1"
-          value="+1.7%"
-          delta="vs -3.8% FY2025"
-          hint="New economy +9-10%, old economy −5%"
+        <LiveStatCard
+          label="FAI Total YTD"
+          logicalId="fai_total_ytd"
           tone="good"
+          hint="Year-to-date FAI growth"
         />
-        <StatCard
+        <LiveStatCard
           label="PPI YoY"
-          value="+0.4%"
-          delta="Apr 2026 — first positive in 41 months"
+          logicalId="ppi_yoy"
           tone="good"
+          hint="Producer price index"
         />
-        <StatCard
-          label="Property FAI"
-          value="−11.2%"
-          delta="2026Q1, improved from −17.2%"
-          tone="bad"
+        <LiveStatCard
+          label="Property FAI YTD"
+          logicalId="fai_real_estate_ytd"
+          invertTone={true}
+          hint="Real estate investment"
         />
-        <StatCard
-          label="High-tech FAI"
-          value="+6.1%"
-          delta="2026Q1, outpacing total"
+        <LiveStatCard
+          label="High-tech FAI YTD"
+          logicalId="fai_hitech_ytd"
           tone="good"
+          hint="High-tech manufacturing capex"
         />
       </div>
 
@@ -104,7 +174,7 @@ export default function Overview() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           <div>
             <div className="font-medium mb-1.5">
-              <Badge variant="secondary" className="font-normal">Phase 1 — now</Badge>
+              <Badge variant="secondary" className="font-normal">Phase 1 — done</Badge>
             </div>
             <ul className="text-muted-foreground space-y-1 list-disc list-inside text-[13px]">
               <li>8 dashboard sections (static)</li>
@@ -116,14 +186,14 @@ export default function Overview() {
           </div>
           <div>
             <div className="font-medium mb-1.5">
-              <Badge variant="outline" className="font-normal">Phase 2 — live data</Badge>
+              <Badge variant="outline" className="font-normal border-emerald-500/40 text-emerald-700 dark:text-emerald-300">Phase 2 — live ✓</Badge>
             </div>
             <ul className="text-muted-foreground space-y-1 list-disc list-inside text-[13px]">
-              <li>CEIC live: FAI, K-shape, PPI, property</li>
-              <li>A-share indices via free sources</li>
-              <li>Release calendar</li>
-              <li>CSV/XLSX export</li>
-              <li>Per-chart "Last updated" timestamps</li>
+              <li>NBS live: FAI, PPI, property, PMI</li>
+              <li>A-share indices via Yahoo Finance</li>
+              <li>Release calendar (30-day rolling)</li>
+              <li>Per-chart provenance chips</li>
+              <li>CEIC search + health endpoint</li>
             </ul>
           </div>
           <div>

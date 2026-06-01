@@ -21,7 +21,7 @@ export async function resolveApiKey(service: string): Promise<string | null> {
     return process.env[envName]!;
   }
   const row = await storage.getApiKey(service);
-  return row?.keyEncrypted ?? null;
+  return row?.apiKey ?? null;
 }
 
 export function keySourceFor(service: string): "env" | "db" | "missing" {

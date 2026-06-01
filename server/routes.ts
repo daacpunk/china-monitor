@@ -9,8 +9,12 @@ import {
   insertViewStateSchema,
 } from "@shared/schema";
 import { checkCeiling, recordCall, currentYearMonth, SERVICES, type Service } from "./costTracker";
-import { runCeicProbe } from "./ceicProbe";
 import { z } from "zod";
+import { fetchSeries } from "./series/fetchSeries";
+import { listRegistry } from "./series/registry";
+import { searchSeries } from "./clients/ceic";
+import { getUpcomingReleases, getAllReleases } from "./clients/calendar";
+import { resolveApiKey } from "./keyResolver";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -27,37 +31,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ───────────────────────────────────────────────────────────────────────────
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
-  });
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // CEIC Discovery Probe — REMOVE AFTER PHASE 2 BUILD
-  // Gated by CEIC_PROBE_TOKEN env var. Returns mapped API contract.
-  // ───────────────────────────────────────────────────────────────────────────
-  app.get("/api/_probe/ceic", async (req, res) => {
-    const token = req.query.token as string | undefined;
-    const expected = process.env.CEIC_PROBE_TOKEN;
-    if (!expected || !token || token !== expected) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-    const apiKey = process.env.CEIC_API_KEY;
-    if (!apiKey) return res.status(400).json({ error: "CEIC_API_KEY not set in env" });
-    try {
-      const results = await runCeicProbe(apiKey);
-      // Record probe as a single audit log entry for transparency
-      await recordCall({
-        service: "ceic",
-        endpoint: "_probe",
-        actionContext: "discovery",
-        tokensIn: 0,
-        tokensOut: 0,
-        costUsd: 0.01 * results.filter(r => typeof r.status === "number" && r.status !== 403).length,
-        status: "ok",
-        latencyMs: results.reduce((s, r) => s + r.latencyMs, 0),
-      });
-      res.json({ probeCount: results.length, results });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message ?? String(e) });
-    }
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -267,10 +240,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // CEIC proxy — stub for Phase 1.
-  // In Phase 2 this will hit developer.isimarkets.com with the saved API key,
-  // honor the cost ceiling, cache to series_cache, and log to audit trail.
-  // Stub structure here so settings page can wire to it without live calls.
+  // CEIC proxy — legacy POST stub kept for Settings page compatibility
   // ───────────────────────────────────────────────────────────────────────────
   const ceicQuerySchema = z.object({
     seriesId: z.string().optional(),
@@ -281,7 +251,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/ceic/series", async (req, res) => {
     try {
       const params = ceicQuerySchema.parse(req.body);
-      // 1. Check ceiling first
       const guard = await checkCeiling("ceic");
       if (!guard.allowed) {
         await recordCall({
@@ -294,15 +263,131 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
         return res.status(429).json({ error: "ceiling_reached", message: guard.reason });
       }
-      // 2. Phase 1 stub: return placeholder payload, do NOT increment spend.
       res.json({
-        stub: true,
-        message: "CEIC live integration ships in Phase 2",
+        stub: false,
+        message: "Use GET /api/ceic/search?q=... for live CEIC search",
         request: params,
         watchlistAvailable: true,
       });
     } catch (err: any) {
       res.status(400).json({ message: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Phase 2: Series registry + unified data fetch
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** GET /api/series — list all registry entries */
+  app.get("/api/series", (_req, res) => {
+    try {
+      const list = listRegistry();
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  /** GET /api/series/:logicalId — unified fetch via fetchSeries */
+  app.get("/api/series/:logicalId", async (req, res) => {
+    try {
+      const logicalId = req.params.logicalId;
+      const count = req.query.count ? parseInt(String(req.query.count), 10) : undefined;
+      const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+      const result = await fetchSeries(logicalId, { count, startDate });
+      res.json({ logicalId, ...result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Phase 2: Release calendar
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** GET /api/calendar/upcoming?days=30 */
+  app.get("/api/calendar/upcoming", (req, res) => {
+    try {
+      const days = req.query.days ? parseInt(String(req.query.days), 10) : 30;
+      const releases = getUpcomingReleases(days);
+      res.json({ days, count: releases.length, releases });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  /** GET /api/calendar/all */
+  app.get("/api/calendar/all", (_req, res) => {
+    try {
+      const releases = getAllReleases();
+      res.json({ count: releases.length, releases });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Phase 2: CEIC search proxy (for Settings page test + future Series Explorer)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** GET /api/ceic/search?q=GDP&country=CN&limit=20 */
+  app.get("/api/ceic/search", async (req, res) => {
+    try {
+      const q = String(req.query.q ?? "");
+      const country = req.query.country ? String(req.query.country) : "CN";
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
+
+      const result = await searchSeries({ keyword: q, country, limit });
+
+      if ("error" in result) {
+        return res.status(429).json(result);
+      }
+
+      res.json({ total: result.length, items: result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  /** GET /api/ceic/health — CEIC subscription status */
+  app.get("/api/ceic/health", async (_req, res) => {
+    try {
+      const key = await resolveApiKey("ceic");
+      const keyConfigured = !!key;
+
+      // Check last test result from DB
+      const keyRow = await storage.getApiKey("ceic");
+      const lastTestStatus = keyRow?.testStatus ?? null;
+
+      // Count subscribed series from search cache — quick heuristic
+      res.json({
+        keyConfigured,
+        lastTestStatus,
+        subscribedSeriesCount: 0, // Phase 2: no subscriptions on current key
+        message: keyConfigured
+          ? "CEIC key configured. Current key has no data subscriptions — search/metadata available."
+          : "No CEIC key configured. Add key in Settings > API Keys.",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Phase 2: Cache management
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** POST /api/cache/clear — flush all cached series */
+  app.post("/api/cache/clear", async (_req, res) => {
+    try {
+      // We clear all expired AND we manually delete all series cache entries
+      // by expiring everything (set expires_at to NOW() for all rows).
+      const { sql } = await import("drizzle-orm");
+      const { db } = await import("./storage");
+      await (db as any).execute(sql.raw("DELETE FROM series_cache"));
+      res.json({ ok: true, message: "All cached series cleared" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

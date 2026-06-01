@@ -11,7 +11,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/lib/theme";
-import { CheckCircle2, AlertCircle, ExternalLink } from "lucide-react";
+import { CheckCircle2, AlertCircle, ExternalLink, Database, RefreshCw, Trash2 } from "lucide-react";
+import { useCeicHealth } from "@/hooks/useSeries";
 
 const SERVICES = [
   { id: "ceic",     name: "CEIC",            docs: "https://developer.isimarkets.com/", hint: "Set in CDMNext > User > API. Header: `Authorization: Bearer …`" },
@@ -146,8 +147,9 @@ function ApiKeysTab() {
 function DataSourcesTab() {
   const { toast } = useToast();
   const { data: settings = [] } = useQuery<any[]>({ queryKey: ["/api/settings"] });
+  const { data: ceicHealth, isLoading: healthLoading, refetch: refetchHealth } = useCeicHealth();
 
-  const ttls = settings.find((s) => s.key === "ttls")?.valueJson ?? {
+  const ttls = settings.find((s: any) => s.key === "ttls")?.valueJson ?? {
     daily: 4 * 60,         // minutes
     monthly: 24 * 60,
     quarterly: 7 * 24 * 60,
@@ -166,6 +168,36 @@ function DataSourcesTab() {
     },
   });
 
+  const clearCacheMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cache/clear");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/series"] });
+      toast({ title: "Cache cleared", description: "All cached series data removed" });
+    },
+    onError: (e: any) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
+  });
+
+  const testCeicMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("GET", "/api/ceic/search?q=GDP&country=CN&limit=1");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      refetchHealth();
+      const count = data.total ?? 0;
+      toast({
+        title: count > 0 ? "CEIC search works" : "CEIC returned no results",
+        description: count > 0
+          ? `Found ${count} series. Subscribed series depend on your CEIC plan.`
+          : "Key may be invalid or no results for 'GDP'.",
+      });
+    },
+    onError: (e: any) => toast({ title: "CEIC test failed", description: e.message, variant: "destructive" }),
+  });
+
   const rows = [
     { key: "daily", label: "Daily series (e.g. A-share close, FX)", suffix: "min" },
     { key: "monthly", label: "Monthly stats (PMI, CPI, IP, FAI)", suffix: "min" },
@@ -175,10 +207,79 @@ function DataSourcesTab() {
 
   return (
     <div className="space-y-4">
+      {/* CEIC subscription health card */}
+      <Card className="p-4" data-testid="ceic-health-card">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Database className="h-4 w-4 text-blue-600" />
+            <h3 className="text-sm font-semibold">CEIC subscription health</h3>
+          </div>
+          {healthLoading ? (
+            <Badge variant="outline" className="font-normal">Loading…</Badge>
+          ) : ceicHealth?.keyConfigured ? (
+            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 font-normal" variant="outline">
+              <CheckCircle2 className="h-3 w-3 mr-1" /> Key configured
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="font-normal">
+              <AlertCircle className="h-3 w-3 mr-1" /> No key
+            </Badge>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+          <div>
+            <div className="text-xs text-muted-foreground">Subscribed series</div>
+            <div className="font-semibold">{ceicHealth?.subscribedSeriesCount ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Data source mode</div>
+            <Badge variant="outline" className="font-normal text-xs mt-0.5">Auto (CEIC primary, free fallback)</Badge>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">{ceicHealth?.message ?? ""}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => testCeicMut.mutate()}
+          disabled={testCeicMut.isPending || !ceicHealth?.keyConfigured}
+          data-testid="button-test-ceic-data"
+        >
+          {testCeicMut.isPending ? (
+            <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Testing…</>
+          ) : (
+            "Test CEIC data access"
+          )}
+        </Button>
+      </Card>
+
+      {/* Cache management card */}
+      <Card className="p-4" data-testid="cache-management-card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Cache management</h3>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Series data is cached server-side. Free sources (NBS, Yahoo, Stooq) cache for 6-24h.
+          Clear to force fresh fetch on next page load.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => clearCacheMut.mutate()}
+          disabled={clearCacheMut.isPending}
+          data-testid="button-clear-cache"
+        >
+          {clearCacheMut.isPending ? (
+            <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Clearing…</>
+          ) : (
+            <><Trash2 className="h-3 w-3 mr-1" />Clear all cached series</>
+          )}
+        </Button>
+      </Card>
+
+      {/* TTL settings */}
       <p className="text-sm text-muted-foreground">
         Cache TTLs control how long fetched data is reused before refetching. Live CEIC pulls happen
-        only when cache is expired or user clicks Refresh. (Phase 2 will respect these — Phase 1 has
-        no live fetches yet.)
+        only when cache is expired or user clicks Refresh.
       </p>
       <Card className="p-4">
         <div className="space-y-3">
@@ -196,10 +297,7 @@ function DataSourcesTab() {
             </div>
           ))}
         </div>
-        <div className="mt-4 flex justify-between items-center">
-          <Button variant="outline" disabled data-testid="button-refresh-all">
-            Force refresh all (Phase 2)
-          </Button>
+        <div className="mt-4 flex justify-end">
           <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending} data-testid="button-save-ttls">
             Save defaults
           </Button>

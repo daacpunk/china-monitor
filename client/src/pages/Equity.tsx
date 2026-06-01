@@ -1,44 +1,151 @@
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ProvenanceChip } from "@/components/ProvenanceChip";
+import { ProvenanceChipLive } from "@/components/ProvenanceChip";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Line } from "react-chartjs-2";
-import { DATA, LAST_UPDATED } from "@/data/staticData";
+import { DATA } from "@/data/staticData";
 import { baseChartOptions, CHART_COLORS } from "@/lib/charts";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useSeries } from "@/hooks/useSeries";
+
+const INDEX_IDS = [
+  { id: "csi300_close",  label: "CSI 300",        color: CHART_COLORS.primary   },
+  { id: "shc_close",     label: "SSE Composite",   color: CHART_COLORS.muted     },
+  { id: "szi_close",     label: "Shenzhen",        color: CHART_COLORS.secondary },
+  { id: "hsi_close",     label: "Hang Seng",       color: CHART_COLORS.amber     },
+  { id: "chinext_close", label: "ChiNext",         color: CHART_COLORS.emerald   },
+  { id: "star50_close",  label: "STAR 50",         color: CHART_COLORS.red       },
+];
+
+function useEquityData() {
+  const csi300  = useSeries("csi300_close")  as any;
+  const shc     = useSeries("shc_close")     as any;
+  const szi     = useSeries("szi_close")     as any;
+  const hsi     = useSeries("hsi_close")     as any;
+  const chinext = useSeries("chinext_close") as any;
+  const star50  = useSeries("star50_close")  as any;
+  return [csi300, shc, szi, hsi, chinext, star50];
+}
 
 export default function Equity() {
-  const r = DATA.aShareReturns;
-  const lineData = {
-    labels: r.years,
-    datasets: [
-      { label: "CSI 300",       data: r.series.csi300,       borderColor: CHART_COLORS.primary, backgroundColor: "transparent", tension: 0.3 },
-      { label: "ChiNext",       data: r.series.chiNext,      borderColor: CHART_COLORS.secondary, backgroundColor: "transparent", tension: 0.3 },
-      { label: "STAR 50",       data: r.series.star50,       borderColor: CHART_COLORS.emerald, backgroundColor: "transparent", tension: 0.3, borderWidth: 2.5 },
-      { label: "SSE Composite", data: r.series.sseComposite, borderColor: CHART_COLORS.muted,    backgroundColor: "transparent", tension: 0.3 },
-    ],
-  };
+  const seriesArr = useEquityData();
+
+  const anyLoading = seriesArr.some((s: any) => s.isLoading);
+  const prov = seriesArr[0]?.data?.provenance;
+
+  // Build chart — align dates, use closing prices
+  const hasData = seriesArr.some((s: any) => (s.data?.data?.length ?? 0) > 0);
+
+  const liveChartData = hasData
+    ? {
+        datasets: seriesArr.map((s: any, i: number) => {
+          const pts: { date: string; value: number | null }[] = s.data?.data ?? [];
+          return {
+            label: INDEX_IDS[i].label,
+            data: pts.map((p) => ({ x: p.date, y: p.value })),
+            borderColor: INDEX_IDS[i].color,
+            backgroundColor: "transparent",
+            tension: 0.3,
+            parsing: { xAxisKey: "x", yAxisKey: "y" },
+            pointRadius: 0,
+          };
+        }),
+      }
+    : null;
+
+  // Latest values for summary table
+  const latestValues = seriesArr.map((s: any, i: number) => {
+    const pts: { date: string; value: number | null }[] = s.data?.data ?? [];
+    const last = pts[pts.length - 1];
+    const prev = pts[pts.length - 2];
+    const chg = last && prev && prev.value ? ((last.value! - prev.value!) / prev.value!) * 100 : null;
+    return {
+      label: INDEX_IDS[i].label,
+      value: last?.value ?? null,
+      date: last?.date ?? null,
+      chg,
+    };
+  });
 
   return (
     <div data-testid="page-equity">
       <PageHeader
         title="A-share equities"
-        subtitle="Returns, valuation, and Stock Connect flows. Phase 2 will wire live index prices via free sources."
-        meta={<><ProvenanceChip type="static" detail={`Static · ${LAST_UPDATED}`} /><ProvenanceChip type="free" detail="Yahoo/Stooq: wires Phase 2" /></>}
+        subtitle="Live index prices from Yahoo Finance — daily close for 6 major China equity indices."
+        meta={
+          <>
+            {prov ? (
+              <ProvenanceChipLive source={prov.source} lastUpdated={prov.lastUpdated} cacheHit={prov.cacheHit} />
+            ) : (
+              <ProvenanceChipLive source="pending" />
+            )}
+          </>
+        }
       />
 
       <Card className="p-5 mb-4">
-        <h2 className="text-sm font-semibold mb-3">Annual returns (%)</h2>
-        <div className="h-72"><Line options={baseChartOptions as any} data={lineData} /></div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Index daily close — 2-year history</h2>
+          <Badge variant="outline" className="font-normal">{hasData ? "Yahoo Finance live" : "Loading…"}</Badge>
+        </div>
+        <div className="h-72">
+          {anyLoading ? (
+            <Skeleton className="h-full w-full" />
+          ) : liveChartData ? (
+            <Line
+              options={{
+                ...baseChartOptions,
+                scales: {
+                  ...baseChartOptions.scales,
+                  x: { type: "time" as const, time: { unit: "month" as const } },
+                },
+              } as any}
+              data={liveChartData}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Couldn't load live data — Yahoo Finance may be unreachable in this environment
+            </div>
+          )}
+        </div>
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-5">
-          <h2 className="text-sm font-semibold mb-3">A-share valuation</h2>
+          <h2 className="text-sm font-semibold mb-3">Latest closing values</h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Index</TableHead>
+                <TableHead className="text-right">Close</TableHead>
+                <TableHead className="text-right">1d chg</TableHead>
+                <TableHead className="text-right">As of</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {latestValues.map((v) => (
+                <TableRow key={v.label}>
+                  <TableCell className="text-sm font-medium">{v.label}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {v.value != null ? v.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
+                  </TableCell>
+                  <TableCell className={`text-right tabular-nums text-xs ${v.chg == null ? "" : v.chg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                    {v.chg != null ? `${v.chg >= 0 ? "+" : ""}${v.chg.toFixed(2)}%` : "—"}
+                  </TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">{v.date ?? "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="text-sm font-semibold mb-3">A-share valuation (static reference)</h2>
           <Table>
             <TableHeader><TableRow><TableHead>Metric</TableHead><TableHead className="text-right">Value</TableHead><TableHead className="text-right">As of</TableHead></TableRow></TableHeader>
             <TableBody>
-              {DATA.aShareValuation.map((v: any) => (
+              {DATA.aShareValuation?.map((v: any) => (
                 <TableRow key={v.metric}>
                   <TableCell className="text-sm">{v.metric}</TableCell>
                   <TableCell className="text-right tabular-nums font-medium">{v.value}</TableCell>
@@ -47,24 +154,6 @@ export default function Equity() {
               ))}
             </TableBody>
           </Table>
-        </Card>
-
-        <Card className="p-5">
-          <h2 className="text-sm font-semibold mb-3">Stock Connect flows</h2>
-          <Table>
-            <TableHeader><TableRow><TableHead>Metric</TableHead><TableHead className="text-right">2024</TableHead><TableHead className="text-right">2025</TableHead><TableHead className="text-right">Δ</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {DATA.stockConnect.metrics.map((m: any) => (
-                <TableRow key={m.metric}>
-                  <TableCell className="text-sm">{m.metric}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">{m.y2024}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">{m.y2025}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs font-medium text-emerald-600 dark:text-emerald-400">{m.delta}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p className="text-xs text-muted-foreground mt-3">{DATA.stockConnect.sectorFocus}</p>
         </Card>
       </div>
     </div>
