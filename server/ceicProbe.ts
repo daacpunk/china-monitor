@@ -16,6 +16,9 @@
 const CEIC_BASE_CANDIDATES = [
   "https://api.ceicdata.com/v2",
   "https://api.ceicdata.com",
+  "https://api.isi-c.com",
+  "https://api.isi-c.com/v2",
+  "https://api.ceic-data.com",
 ];
 
 type ProbeResult = {
@@ -92,10 +95,55 @@ export async function runCeicProbe(apiKey: string): Promise<ProbeResult[]> {
   const authVariants = [
     { name: "Authorization", value: `Bearer ${apiKey}` },
     { name: "Authorization", value: `Token ${apiKey}` },
+    { name: "Authorization", value: apiKey },
     { name: "x-api-key", value: apiKey },
     { name: "X-API-Key", value: apiKey },
     { name: "API-Key", value: apiKey },
+    { name: "apikey", value: apiKey },
+    { name: "Ocp-Apim-Subscription-Key", value: apiKey },
+    { name: "ceic-token", value: apiKey },
+    { name: "ceic-api-key", value: apiKey },
   ];
+
+  // Try the key as a query param too (some gateways accept this)
+  const queryParamUrls = [
+    `https://api.ceicdata.com/v2/series?api_key=${encodeURIComponent(apiKey)}`,
+    `https://api.ceicdata.com/v2/series?token=${encodeURIComponent(apiKey)}`,
+    `https://api.ceicdata.com/v2/series?access_token=${encodeURIComponent(apiKey)}`,
+  ];
+  for (const u of queryParamUrls) {
+    results.push(await probeOne(u, null));
+  }
+
+  // First: try OAuth-style token endpoints. CEIC may issue access tokens
+  // from credentials, and the "API key" is actually a client_secret or
+  // a long-lived bearer.
+  const oauthCandidates = [
+    "https://api.ceicdata.com/v2/token",
+    "https://api.ceicdata.com/v2/oauth/token",
+    "https://api.ceicdata.com/v2/auth/token",
+    "https://api.ceicdata.com/oauth2/token",
+    "https://auth.ceicdata.com/oauth2/token",
+    "https://api.ceicdata.com/v2/login",
+  ];
+  for (const u of oauthCandidates) {
+    // Try GET (some auth endpoints accept it)
+    results.push(await probeOne(u, null, "GET"));
+    // Try POST with token in body (OAuth-ish)
+    results.push(
+      await probeOne(u, null, "POST", {
+        grant_type: "api_key",
+        api_key: apiKey,
+      }),
+    );
+    // Try POST with client_credentials
+    results.push(
+      await probeOne(u, null, "POST", {
+        grant_type: "client_credentials",
+        client_secret: apiKey,
+      }),
+    );
+  }
 
   for (const base of CEIC_BASE_CANDIDATES) {
     // 1. Bare root  — what error / 401 do we get?
