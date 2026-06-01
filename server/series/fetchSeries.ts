@@ -11,6 +11,7 @@ import { REGISTRY, getEntry } from "./registry";
 import { getMonthlySeries, getQuarterlySeries } from "../clients/nbs";
 import { getDailyClose } from "../clients/stooq";
 import { getChart } from "../clients/yahoo";
+import { getFredSeries } from "../clients/fred";
 
 export interface TimePoint {
   date: string;
@@ -18,7 +19,7 @@ export interface TimePoint {
 }
 
 export interface Provenance {
-  source: "ceic" | "nbs" | "stooq" | "yahoo" | "pending" | "static";
+  source: "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static";
   lastUpdated: string; // ISO timestamp
   subscribed: boolean;
   cacheHit: boolean;
@@ -88,6 +89,30 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
       }
     } catch (err: any) {
       console.warn(`[fetchSeries] NBS failed for ${logicalId}:`, err.message);
+    }
+  }
+
+  // ─── Try FRED (if configured and NBS failed) ─────────────────────────────
+  if (entry.fred) {
+    try {
+      const points = await getFredSeries(entry.fred.seriesId, {
+        units: entry.fred.units,
+        limit: 120,
+      });
+
+      if (points.length > 0) {
+        return {
+          data: points,
+          provenance: {
+            source: "fred",
+            lastUpdated: now,
+            subscribed: false,
+            cacheHit: false,
+          },
+        };
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] FRED failed for ${logicalId}:`, err.message);
     }
   }
 

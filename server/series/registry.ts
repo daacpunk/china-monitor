@@ -11,7 +11,7 @@
  * endpoints by default — falls back to free sources.
  */
 
-export type DataSourceName = "ceic" | "nbs" | "yahoo" | "stooq" | "pending";
+export type DataSourceName = "ceic" | "nbs" | "fred" | "yahoo" | "stooq" | "pending";
 export type SeriesCategory =
   | "fai"
   | "margins"
@@ -44,6 +44,23 @@ export interface StooqConfig {
   rangeDays?: number;
 }
 
+/**
+ * FRED (St. Louis Fed) series config.
+ * Free API key required: fred.stlouisfed.org/docs/api/api_key.html
+ * Set FRED_API_KEY env var on Railway.
+ */
+export interface FredConfig {
+  seriesId: string;
+  /**
+   * Optional FRED units transform:
+   *   "lin"  = raw levels (default)
+   *   "pc1"  = percent change from year ago (YoY)
+   *   "pch"  = percent change (MoM)
+   * See: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
+   */
+  units?: "lin" | "pc1" | "pch" | "chg";
+}
+
 export interface SeriesEntry {
   label: string;
   unit: string;
@@ -51,6 +68,7 @@ export interface SeriesEntry {
   fallback: DataSourceName;
   ceic?: CeicConfig;
   nbs?: NbsConfig;
+  fred?: FredConfig;   // FRED fallback when NBS is unreachable (overseas IP)
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -64,6 +82,9 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "fai",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A05010101" },
+    // FRED: CHNFAIYOY — China Fixed Asset Investment YoY (monthly, OECD/NBS proxy)
+    // Note: FRED does not carry FAI sub-breakdowns; main series only
+    fred: { seriesId: "CHNFAIYOY", units: "lin" },
     ceic: { searchKeyword: "Fixed Asset Investment Total", country: "CN" },
     notes: "Total fixed asset investment, year-to-date YoY growth",
   },
@@ -109,8 +130,10 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "margins",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A07010101" },
+    // FRED: CHNPPIINDUSTRY = PPI: Industry for China (OECD MEI, monthly)
+    fred: { seriesId: "CHNPPIINDUSTRY", units: "pc1" },
     ceic: { searchKeyword: "Producer Price Index", country: "CN" },
-    notes: "All-industry PPI YoY",
+    notes: "All-industry PPI YoY. FRED fallback: OECD MEI series, lags NBS ~1 month.",
   },
   cpi_yoy: {
     label: "CPI YoY %",
@@ -118,6 +141,9 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "macro",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A01010101" },
+    // FRED: CHNCPIALLMINMEI = CPI: Total for China (OECD MEI, monthly index level)
+    // units=pc1 gives YoY % change
+    fred: { seriesId: "CHNCPIALLMINMEI", units: "pc1" },
     ceic: { searchKeyword: "Consumer Price Index China", country: "CN" },
   },
 
@@ -128,6 +154,9 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "kshape",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A02010101" },
+    // FRED: CHNPROINDMISMEI = Industrial Production for China (OECD MEI, monthly)
+    // units=pc1 gives YoY % change
+    fred: { seriesId: "CHNPROINDMISMEI", units: "pc1" },
     ceic: { searchKeyword: "Industrial Value Added China", country: "CN" },
   },
 
@@ -148,8 +177,11 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "macro",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A01160101" },
+    // FRED: CHNMFGPMI = Caixin Manufacturing PMI for China (monthly)
+    // Note: Caixin PMI (private sector) vs NBS PMI (all firms) — directionally aligned
+    fred: { seriesId: "CHNMFGPMI", units: "lin" },
     ceic: { searchKeyword: "PMI Manufacturing NBS", country: "CN" },
-    notes: "NBS official PMI manufacturing, 50 = neutral",
+    notes: "NBS official PMI manufacturing. FRED fallback: Caixin PMI (private sector proxy).",
   },
   pmi_services: {
     label: "PMI Services (Non-Manufacturing)",
@@ -157,8 +189,10 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "macro",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A01160401" },
+    // FRED: CHNNFCPMI = Caixin Non-farm Composite PMI for China
+    fred: { seriesId: "CHNNFCPMI", units: "lin" },
     ceic: { searchKeyword: "PMI Non-Manufacturing NBS", country: "CN" },
-    notes: "NBS non-manufacturing PMI composite",
+    notes: "NBS non-manufacturing PMI. FRED fallback: Caixin composite PMI.",
   },
 
   // ─── Trade ────────────────────────────────────────────────────────────────
@@ -246,8 +280,10 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "gdp",
     fallback: "nbs",
     nbs: { dbcode: "hgjd", code: "A010101" },
+    // FRED: CHNNGDPRNAQISMEI = GDP YoY % change for China (OECD MEI, quarterly)
+    fred: { seriesId: "CHNNGDPRNAQISMEI", units: "pc1" },
     ceic: { searchKeyword: "GDP Growth Rate China Quarterly", country: "CN" },
-    notes: "Quarterly GDP YoY growth rate",
+    notes: "Quarterly GDP YoY growth rate. FRED fallback: OECD MEI quarterly index.",
   },
 
   // ─── Fiscal ───────────────────────────────────────────────────────────────
@@ -258,7 +294,7 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A0I0101" },
     ceic: { searchKeyword: "Government Revenue China", country: "CN" },
-    notes: "General public budget revenue YoY",
+    notes: "General public budget revenue YoY. No FRED equivalent — requires CEIC.",
   },
 
   // ─── Property ─────────────────────────────────────────────────────────────
@@ -269,7 +305,7 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A0D0101" },
     ceic: { searchKeyword: "Newly Built Commercial Residential Building Price", country: "CN" },
-    notes: "70-city average new residential price MoM",
+    notes: "70-city average new residential price MoM. No FRED equivalent — requires CEIC.",
   },
   property_starts_ytd: {
     label: "Property New Starts YTD YoY %",

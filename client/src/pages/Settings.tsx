@@ -19,6 +19,7 @@ const SERVICES = [
   { id: "sonar",    name: "Perplexity Sonar Pro", docs: "https://docs.perplexity.ai/",  hint: "Generate at perplexity.ai/account/api" },
   { id: "anthropic", name: "Anthropic Claude", docs: "https://docs.anthropic.com/",     hint: "Generate at console.anthropic.com/keys" },
   { id: "deepseek", name: "DeepSeek",        docs: "https://api-docs.deepseek.com/",    hint: "Generate at platform.deepseek.com/api_keys" },
+  { id: "fred",     name: "FRED (St. Louis Fed)", docs: "https://fred.stlouisfed.org/docs/api/api_key.html", hint: "Free key — register at fred.stlouisfed.org. Required for China CPI/PPI/PMI/IP when NBS is unreachable from overseas (Railway/EU/US hosting)." },
 ];
 
 function ApiKeysTab() {
@@ -148,6 +149,18 @@ function DataSourcesTab() {
   const { toast } = useToast();
   const { data: settings = [] } = useQuery<any[]>({ queryKey: ["/api/settings"] });
   const { data: ceicHealth, isLoading: healthLoading, refetch: refetchHealth } = useCeicHealth();
+  const { data: fredHealth, isLoading: fredHealthLoading, refetch: refetchFredHealth } = useQuery<{
+    ok: boolean;
+    keyConfigured: boolean;
+    message: string;
+  }>({
+    queryKey: ["/api/fred/health"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/fred/health");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
 
   const ttls = settings.find((s: any) => s.key === "ttls")?.valueJson ?? {
     daily: 4 * 60,         // minutes
@@ -196,6 +209,22 @@ function DataSourcesTab() {
       });
     },
     onError: (e: any) => toast({ title: "CEIC test failed", description: e.message, variant: "destructive" }),
+  });
+
+  const testFredMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("GET", "/api/fred/health");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      refetchFredHealth();
+      toast({
+        title: data.ok ? "FRED key valid" : "FRED key issue",
+        description: data.message,
+        variant: data.ok ? "default" : "destructive",
+      });
+    },
+    onError: (e: any) => toast({ title: "FRED test failed", description: e.message, variant: "destructive" }),
   });
 
   const rows = [
@@ -250,6 +279,62 @@ function DataSourcesTab() {
             "Test CEIC data access"
           )}
         </Button>
+      </Card>
+
+      {/* FRED data source health card */}
+      <Card className="p-4" data-testid="fred-health-card">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Database className="h-4 w-4 text-green-600" />
+            <h3 className="text-sm font-semibold">FRED (St. Louis Fed) — NBS fallback</h3>
+          </div>
+          {fredHealthLoading ? (
+            <Badge variant="outline" className="font-normal">Loading…</Badge>
+          ) : fredHealth?.keyConfigured ? (
+            fredHealth.ok ? (
+              <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 font-normal" variant="outline">
+                <CheckCircle2 className="h-3 w-3 mr-1" /> Key valid
+              </Badge>
+            ) : (
+              <Badge variant="destructive" className="font-normal">
+                <AlertCircle className="h-3 w-3 mr-1" /> Key invalid
+              </Badge>
+            )
+          ) : (
+            <Badge variant="outline" className="font-normal text-amber-700 border-amber-300">
+              <AlertCircle className="h-3 w-3 mr-1" /> No key
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mb-2">
+          FRED provides China CPI, PPI, Industrial Production, PMI, and GDP monthly data (OECD MEI + Caixin) when NBS
+          is unreachable from overseas servers. <strong>Free key</strong> — takes 30 seconds to obtain.
+        </p>
+        <p className="text-xs text-muted-foreground mb-3">
+          {fredHealth?.message ?? "Add FRED_API_KEY to Railway env vars or via API Keys tab."}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => testFredMut.mutate()}
+          disabled={testFredMut.isPending}
+          data-testid="button-test-fred"
+        >
+          {testFredMut.isPending ? (
+            <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Testing…</>
+          ) : (
+            "Test FRED connection"
+          )}
+        </Button>
+        {!fredHealth?.keyConfigured && (
+          <p className="text-xs text-muted-foreground mt-2">
+            → Get free key at{" "}
+            <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" rel="noreferrer" className="underline text-blue-600">
+              fred.stlouisfed.org
+            </a>
+            {" "}then set <code className="bg-muted px-1 rounded">FRED_API_KEY</code> in Railway Variables.
+          </p>
+        )}
       </Card>
 
       {/* Cache management card */}

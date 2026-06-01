@@ -6,7 +6,7 @@ import { Database, Globe, Sparkles, FileText, Clock, AlertCircle } from "lucide-
 export type ProvenanceType = "static" | "ceic" | "sonar" | "claude" | "deepseek" | "free" | "user";
 
 // ─── Phase 2 extended source type ─────────────────────────────────────────────
-export type ProvenanceSource = "ceic" | "nbs" | "stooq" | "yahoo" | "pending" | "static";
+export type ProvenanceSource = "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static";
 
 const LEGACY_STYLES: Record<ProvenanceType, { label: string; cls: string; icon: any }> = {
   static:   { label: "Static (May 2026)",  cls: "bg-muted text-muted-foreground",                                   icon: FileText  },
@@ -21,6 +21,7 @@ const LEGACY_STYLES: Record<ProvenanceType, { label: string; cls: string; icon: 
 const SOURCE_STYLES: Record<ProvenanceSource, { label: string; cls: string; icon: any }> = {
   ceic:    { label: "CEIC",         cls: "bg-blue-500/10 text-blue-700 dark:text-blue-300",             icon: Database      },
   nbs:     { label: "NBS",          cls: "bg-red-500/10 text-red-700 dark:text-red-300",                icon: Database      },
+  fred:    { label: "FRED",         cls: "bg-green-500/10 text-green-700 dark:text-green-300",          icon: Database      },
   stooq:   { label: "Stooq",        cls: "bg-gray-500/10 text-gray-700 dark:text-gray-300",             icon: Globe         },
   yahoo:   { label: "Yahoo Finance", cls: "bg-purple-500/10 text-purple-700 dark:text-purple-300",      icon: Globe         },
   pending: { label: "Pending",       cls: "bg-amber-500/10 text-amber-700 dark:text-amber-300",          icon: AlertCircle   },

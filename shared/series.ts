@@ -7,7 +7,7 @@ export interface TimePoint {
   value: number | null;
 }
 
-export type ProvenanceSource = "ceic" | "nbs" | "stooq" | "yahoo" | "pending" | "static";
+export type ProvenanceSource = "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static";
 
 export interface Provenance {
   source: ProvenanceSource;

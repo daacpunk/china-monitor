@@ -391,6 +391,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/fred/health — FRED API key status and connectivity test */
+  app.get("/api/fred/health", async (_req, res) => {
+    try {
+      const { checkFredHealth } = await import("./clients/fred");
+      const result = await checkFredHealth();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, keyConfigured: false, message: err.message });
+    }
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // Watchlists (P3 — schema only, list/create/delete enabled)
   // ───────────────────────────────────────────────────────────────────────────

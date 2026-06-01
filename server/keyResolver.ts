@@ -13,6 +13,7 @@ const ENV_MAP: Record<string, string> = {
   sonar: "SONAR_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
+  fred: "FRED_API_KEY",
 };
 
 export async function resolveApiKey(service: string): Promise<string | null> {
