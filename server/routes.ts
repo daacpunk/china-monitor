@@ -9,6 +9,7 @@ import {
   insertViewStateSchema,
 } from "@shared/schema";
 import { checkCeiling, recordCall, currentYearMonth, SERVICES, type Service } from "./costTracker";
+import { runCeicProbe } from "./ceicProbe";
 import { z } from "zod";
 
 /**
@@ -26,6 +27,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ───────────────────────────────────────────────────────────────────────────
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // CEIC Discovery Probe — REMOVE AFTER PHASE 2 BUILD
+  // Gated by CEIC_PROBE_TOKEN env var. Returns mapped API contract.
+  // ───────────────────────────────────────────────────────────────────────────
+  app.get("/api/_probe/ceic", async (req, res) => {
+    const token = req.query.token as string | undefined;
+    const expected = process.env.CEIC_PROBE_TOKEN;
+    if (!expected || !token || token !== expected) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const apiKey = process.env.CEIC_API_KEY;
+    if (!apiKey) return res.status(400).json({ error: "CEIC_API_KEY not set in env" });
+    try {
+      const results = await runCeicProbe(apiKey);
+      // Record probe as a single audit log entry for transparency
+      await recordCall({
+        service: "ceic",
+        endpoint: "_probe",
+        actionContext: "discovery",
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0.01 * results.filter(r => typeof r.status === "number" && r.status !== 403).length,
+        status: "ok",
+        latencyMs: results.reduce((s, r) => s + r.latencyMs, 0),
+      });
+      res.json({ probeCount: results.length, results });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message ?? String(e) });
+    }
   });
 
   // ───────────────────────────────────────────────────────────────────────────
