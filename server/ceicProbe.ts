@@ -38,17 +38,29 @@ async function probeOne(
   authHeader: { name: string; value: string } | null,
   method: "GET" | "POST" = "GET",
   body?: any,
+  bodyFormat: "json" | "form" = "json",
 ): Promise<ProbeResult> {
   const start = Date.now();
   const headers: Record<string, string> = { Accept: "application/json" };
   if (authHeader) headers[authHeader.name] = authHeader.value;
-  if (body) headers["Content-Type"] = "application/json";
+  let serializedBody: string | undefined = undefined;
+  if (body) {
+    if (bodyFormat === "form") {
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      serializedBody = Object.entries(body)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .join("&");
+    } else {
+      headers["Content-Type"] = "application/json";
+      serializedBody = JSON.stringify(body);
+    }
+  }
 
   try {
     const r = await fetch(url, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: serializedBody,
       signal: AbortSignal.timeout(15000),
     });
     const text = await r.text();
@@ -90,6 +102,46 @@ async function probeOne(
 
 export async function runCeicProbe(apiKey: string): Promise<ProbeResult[]> {
   const results: ProbeResult[] = [];
+
+  // PHASE 1 OF DISCOVERY: focus on /v2/login - this is the confirmed entry point.
+  // Try every plausible body shape. CEIC v2 login likely returns a session/access token.
+  const loginUrl = "https://api.ceicdata.com/v2/login";
+  const loginBodies = [
+    { apiKey },
+    { api_key: apiKey },
+    { token: apiKey },
+    { key: apiKey },
+    { username: apiKey, password: apiKey },
+    { ApiKey: apiKey },
+    { application_key: apiKey },
+    { client_id: apiKey, grant_type: "client_credentials" },
+  ];
+  for (const body of loginBodies) {
+    results.push(await probeOne(loginUrl, null, "POST", body, "json"));
+    results.push(await probeOne(loginUrl, null, "POST", body, "form"));
+  }
+  // Also GET with various query params
+  results.push(await probeOne(`${loginUrl}?apiKey=${encodeURIComponent(apiKey)}`, null, "GET"));
+  results.push(await probeOne(`${loginUrl}?api_key=${encodeURIComponent(apiKey)}`, null, "GET"));
+  // POST with key in Authorization header
+  results.push(
+    await probeOne(loginUrl, { name: "Authorization", value: `Bearer ${apiKey}` }, "POST", {}),
+  );
+  results.push(
+    await probeOne(loginUrl, { name: "x-api-key", value: apiKey }, "POST", {}),
+  );
+  // Try sibling auth endpoints we haven't yet
+  for (const u of [
+    "https://api.ceicdata.com/v2/auth",
+    "https://api.ceicdata.com/v2/session",
+    "https://api.ceicdata.com/v2/signin",
+    "https://api.ceicdata.com/v2/applogin",
+    "https://api.ceicdata.com/v2/application/login",
+    "https://api.ceicdata.com/v2/api/login",
+  ]) {
+    results.push(await probeOne(u, null, "POST", { apiKey }));
+    results.push(await probeOne(u, null, "POST", { api_key: apiKey }));
+  }
 
   // Auth scheme variants to try
   const authVariants = [
@@ -144,6 +196,16 @@ export async function runCeicProbe(apiKey: string): Promise<ProbeResult[]> {
       }),
     );
   }
+
+  // SHORT-CIRCUIT: if we already found a working login, skip the rest
+  const foundLogin = results.find(
+    (r) =>
+      typeof r.status === "number" &&
+      r.status >= 200 &&
+      r.status < 300 &&
+      r.url.includes("login"),
+  );
+  if (foundLogin) return results;
 
   for (const base of CEIC_BASE_CANDIDATES) {
     // 1. Bare root  — what error / 401 do we get?
