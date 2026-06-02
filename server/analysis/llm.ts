@@ -25,8 +25,8 @@ const MODEL_META: Record<
   LlmModel,
   { service: Service; provider: "anthropic" | "deepseek"; apiModel: string }
 > = {
-  "claude-sonnet-4":    { service: "anthropic", provider: "anthropic", apiModel: "claude-sonnet-4-5-20250929" },
-  "claude-haiku-4":     { service: "anthropic", provider: "anthropic", apiModel: "claude-haiku-4-5-20250929" },
+  "claude-sonnet-4":    { service: "anthropic", provider: "anthropic", apiModel: "claude-sonnet-4-6" },
+  "claude-haiku-4":     { service: "anthropic", provider: "anthropic", apiModel: "claude-haiku-4-5" },
   "deepseek-chat":      { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-chat" },
   "deepseek-reasoner":  { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-reasoner" },
 };
