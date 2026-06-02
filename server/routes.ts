@@ -570,6 +570,194 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── Analysis (Phase 3a) ───────────────────────────────────────────────
+  // Cross-source comparison, anomaly detection, and LLM commentary.
+
+  /** POST /api/analysis/compare
+   *  Body: { ids: string[]; startDate?: string }
+   *  Returns aligned series + Pearson correlation matrix.
+   */
+  app.post("/api/analysis/compare", async (req, res) => {
+    try {
+      const Body = z.object({
+        ids: z.array(z.string().min(1)).min(2).max(8),
+        startDate: z.string().optional(),
+      });
+      const body = Body.parse(req.body);
+
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { alignSeries, correlationMatrix } = await import("./analysis/stats");
+
+      const results = await Promise.all(
+        body.ids.map(async (id) => {
+          const r = await fetchSeries(id, { startDate: body.startDate });
+          return { id, points: r.data, provenance: r.provenance };
+        }),
+      );
+
+      const aligned = alignSeries(results.map(({ id, points }) => ({ id, points })));
+      const matrix = correlationMatrix(body.ids, aligned.values);
+
+      res.json({
+        ids: body.ids,
+        dates: aligned.dates,
+        values: aligned.values,
+        correlationMatrix: matrix,
+        provenance: Object.fromEntries(results.map((r) => [r.id, r.provenance])),
+        commonPoints: aligned.dates.length,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/analysis/anomalies
+   *  Body: { ids: string[]; windowSize?: number }
+   *  Returns z-score severity flags for the latest print of each series.
+   */
+  app.post("/api/analysis/anomalies", async (req, res) => {
+    try {
+      const Body = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(40),
+        windowSize: z.number().int().positive().max(120).optional(),
+      });
+      const body = Body.parse(req.body);
+
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { detectAnomaly, pctChange } = await import("./analysis/stats");
+
+      const results = await Promise.all(
+        body.ids.map(async (id) => {
+          const r = await fetchSeries(id);
+          const anomaly = detectAnomaly(r.data, body.windowSize ?? 24);
+          return {
+            id,
+            anomaly,
+            momLagPct: pctChange(r.data, 1),
+            yoyLagPct: pctChange(r.data, 12),
+            provenance: r.provenance,
+          };
+        }),
+      );
+
+      res.json({ results });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/analysis/commentary
+   *  Body: { logicalId: string; model?: LlmModel; question?: string }
+   *  Returns analyst-style commentary. Cached + cost-tracked.
+   */
+  app.post("/api/analysis/commentary", async (req, res) => {
+    try {
+      const Body = z.object({
+        logicalId: z.string().min(1),
+        model: z
+          .enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"])
+          .optional(),
+        question: z.string().max(500).optional(),
+        contextIds: z.array(z.string()).max(4).optional(),
+      });
+      const body = Body.parse(req.body);
+      const model = body.model ?? "claude-sonnet-4";
+
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { detectAnomaly, pctChange, cleanSeries } = await import("./analysis/stats");
+      const { generateCommentary } = await import("./analysis/llm");
+      const { getEntry } = await import("./series/registry");
+
+      const primary = await fetchSeries(body.logicalId);
+      const entry = getEntry(body.logicalId);
+      const cleaned = cleanSeries(primary.data);
+      if (cleaned.length === 0) {
+        return res.status(404).json({ error: `No data available for ${body.logicalId}` });
+      }
+      const tail = cleaned.slice(-24); // last 24 obs (2y monthly)
+      const anomaly = detectAnomaly(primary.data);
+      const mom = pctChange(primary.data, 1);
+      const yoy = pctChange(primary.data, 12);
+
+      // Context series (optional)
+      let contextBlocks = "";
+      if (body.contextIds && body.contextIds.length > 0) {
+        const contexts = await Promise.all(body.contextIds.map(async (cid) => {
+          const r = await fetchSeries(cid);
+          const cleanedC = cleanSeries(r.data).slice(-12);
+          return `### ${cid}\n${cleanedC.map((p) => `${p.date}: ${p.value}`).join("\n")}`;
+        }));
+        contextBlocks = `\n\n## Related series for context\n${contexts.join("\n\n")}`;
+      }
+
+      const seriesLabel = entry?.label ?? body.logicalId;
+      const unit = entry?.unit ?? "";
+      const category = entry?.category ?? "unknown";
+
+      const systemPrompt =
+        "You are a senior macro analyst covering China for an institutional investor. " +
+        "You write concise, fact-grounded commentary in the style of a buy-side morning note. " +
+        "You NEVER invent numbers \u2014 only refer to data shown in the prompt. " +
+        "You highlight inflection points, surprises vs trend, and key risks. " +
+        "You write in clear English with one summary sentence followed by 3-4 short bullets. " +
+        "Avoid jargon when a plain word will do. Do not editorialise.";
+
+      const userPrompt = [
+        `# Series: ${seriesLabel} (id: \`${body.logicalId}\`)`,
+        `Category: ${category}`,
+        `Unit: ${unit || "unknown"}`,
+        `Source: ${primary.provenance.source}`,
+        ``,
+        `## Latest 24 observations`,
+        tail.map((p) => `${p.date}: ${p.value}`).join("\n"),
+        ``,
+        `## Computed deltas`,
+        `- Latest: ${cleaned[cleaned.length - 1].value} on ${cleaned[cleaned.length - 1].date}`,
+        `- 1-period change: ${mom != null ? mom.toFixed(2) + "%" : "n/a"}`,
+        `- 12-period change: ${yoy != null ? yoy.toFixed(2) + "%" : "n/a"}`,
+        anomaly
+          ? `- Z-score vs trailing ${anomaly.windowSize}: ${anomaly.zScore.toFixed(2)} (${anomaly.severity})`
+          : `- Z-score: n/a (insufficient history)`,
+        contextBlocks,
+        ``,
+        body.question
+          ? `## Specific question from analyst\n${body.question}`
+          : `## Task\nProvide commentary on the latest print. What is it telling us? What should we watch next?`,
+      ].join("\n");
+
+      const result = await generateCommentary({
+        model,
+        systemPrompt,
+        userPrompt,
+        actionContext: `commentary:${body.logicalId}`,
+        maxOutputTokens: 800,
+      });
+
+      res.json({
+        logicalId: body.logicalId,
+        label: seriesLabel,
+        commentary: result.text,
+        model: result.model,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        costUsd: result.costUsd,
+        cacheHit: result.cacheHit,
+        fetchedAt: result.fetchedAt,
+        latestObservation: cleaned[cleaned.length - 1],
+        mom,
+        yoy,
+        anomaly,
+      });
+    } catch (err: any) {
+      const msg = err.message || String(err);
+      const status =
+        msg.includes("Blocked by cost ceiling") ? 429 :
+        msg.includes("No API key") ? 412 :
+        500;
+      res.status(status).json({ error: msg });
+    }
+  });
+
   // ─── Imports / FactSet (Phase 2.5) ─────────────────────────────────────
   // The user has FactSet workstation but no API access, so we accept pasted
   // or uploaded CSV text and store the points in the `imported_series` table.
