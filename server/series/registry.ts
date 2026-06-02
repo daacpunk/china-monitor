@@ -1,17 +1,19 @@
 /**
  * Series registry — maps logical IDs to data sources.
  *
- * Priority order for fetching:
- * 1. NBS (free, reliable for Chinese macro)
- * 2. Yahoo Finance (free, good for equity indices)
- * 3. Stooq (free, A-share alternative)
- * 4. CEIC (paid, search/metadata only in Phase 2)
+ * Priority order (Phase 2.5, post-discovery):
+ * 1. CEIC (paid, key has 246 subscribed China/HK/TW series — highest accuracy)
+ * 2. NBS direct (free, BLOCKED from Railway US IPs — keep for self-hosted later)
+ * 3. FRED (free, OECD/Caixin republications — fallback for major macro)
+ * 4. EastMoney (free, China retail finance — equity flows/sectors)
+ * 5. Yahoo Finance (free, equity indices)
+ * 6. Stooq (free, A-share alternative)
  *
- * For Phase 2: CEIC config exists but fetchSeries will NOT call CEIC data
- * endpoints by default — falls back to free sources.
+ * Phase 2.5 change: CEIC promoted from search-only to PRIMARY for series with
+ * direct seriesId mapping (`ceic.seriesId`). Falls back to FRED/Yahoo if CEIC fails.
  */
 
-export type DataSourceName = "ceic" | "nbs" | "fred" | "yahoo" | "stooq" | "pending";
+export type DataSourceName = "ceic" | "nbs" | "fred" | "eastmoney" | "yahoo" | "stooq" | "pending";
 export type SeriesCategory =
   | "fai"
   | "margins"
@@ -24,8 +26,18 @@ export type SeriesCategory =
   | "macro";
 
 export interface CeicConfig {
+  /** Direct CEIC series ID — set if confirmed subscribed (preferred). */
+  seriesId?: number;
+  /** Fallback keyword search if seriesId not set. */
   searchKeyword: string;
   country?: string;
+  /**
+   * Optional value transform applied to CEIC raw values before storage.
+   *   "raw" (default) — use value as-is
+   *   "yoy"           — compute YoY % from monthly levels (if CEIC returns levels)
+   *   "divide_1000"   — divide by 1000 (e.g. USD mn → USD bn)
+   */
+  transform?: "raw" | "yoy" | "divide_1000";
 }
 
 export interface NbsConfig {
@@ -61,6 +73,28 @@ export interface FredConfig {
   units?: "lin" | "pc1" | "pch" | "chg";
 }
 
+/**
+ * EastMoney (东方财富) free-API config — direct A-share/HK flow data.
+ * Each client function returns a richer payload than a single TimePoint stream,
+ * so the registry picks ONE field as the canonical TimePoint value, and the
+ * route layer continues to expose the full payload for richer UI.
+ */
+export interface EastMoneyConfig {
+  clientFn:
+    | "getStockConnectFlow"
+    | "getMarginBalance"
+    | "getSectorPerformance";
+  /**
+   * Which field of the row to map into TimePoint.value.
+   *   - getStockConnectFlow: "totalInflow" | "shanghaiInflow" | "shenzhenInflow"
+   *   - getMarginBalance:    "rzrqye" | "rzye" | "rqye"
+   *   - getSectorPerformance: not time-series (snapshot only) — leave undefined
+   */
+  valueField?: string;
+  /** Optional value scale (e.g. CNY → CNY billions). */
+  divideBy?: number;
+}
+
 export interface SeriesEntry {
   label: string;
   unit: string;
@@ -69,6 +103,7 @@ export interface SeriesEntry {
   ceic?: CeicConfig;
   nbs?: NbsConfig;
   fred?: FredConfig;   // FRED fallback when NBS is unreachable (overseas IP)
+  eastmoney?: EastMoneyConfig;
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -82,11 +117,9 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "fai",
     fallback: "nbs",
     nbs: { dbcode: "hgyd", code: "A05010101" },
-    // FRED: CHNFAIYOY — China Fixed Asset Investment YoY (monthly, OECD/NBS proxy)
-    // Note: FRED does not carry FAI sub-breakdowns; main series only
     fred: { seriesId: "CHNFAIYOY", units: "lin" },
     ceic: { searchKeyword: "Fixed Asset Investment Total", country: "CN" },
-    notes: "Total fixed asset investment, year-to-date YoY growth",
+    notes: "FAI not in CEIC subscribed China set; FRED/NBS only",
   },
   fai_real_estate_ytd: {
     label: "FAI Real Estate YTD YoY %",
@@ -128,23 +161,21 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     label: "PPI YoY %",
     unit: "%",
     category: "margins",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 313572201, searchKeyword: "Producer Price Index", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A07010101" },
-    // FRED: CHNPPIINDUSTRY = PPI: Industry for China (OECD MEI, monthly)
     fred: { seriesId: "CHNPPIINDUSTRY", units: "pc1" },
-    ceic: { searchKeyword: "Producer Price Index", country: "CN" },
-    notes: "All-industry PPI YoY. FRED fallback: OECD MEI series, lags NBS ~1 month.",
+    notes: "CEIC: Producer Price Index: YoY: Monthly: China (id=313572201).",
   },
   cpi_yoy: {
     label: "CPI YoY %",
     unit: "%",
     category: "macro",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 249097301, searchKeyword: "Consumer Price Index China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A01010101" },
-    // FRED: CHNCPIALLMINMEI = CPI: Total for China (OECD MEI, monthly index level)
-    // units=pc1 gives YoY % change
     fred: { seriesId: "CHNCPIALLMINMEI", units: "pc1" },
-    ceic: { searchKeyword: "Consumer Price Index China", country: "CN" },
+    notes: "CEIC: Consumer Price Index: YoY: Monthly: China (id=249097301).",
   },
 
   // ─── Industrial Value Added (K-Shape) ─────────────────────────────────────
@@ -152,12 +183,11 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     label: "Industrial Value Added YoY %",
     unit: "%",
     category: "kshape",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 314953101, searchKeyword: "Industrial Production Index China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A02010101" },
-    // FRED: CHNPROINDMISMEI = Industrial Production for China (OECD MEI, monthly)
-    // units=pc1 gives YoY % change
     fred: { seriesId: "CHNPROINDMISMEI", units: "pc1" },
-    ceic: { searchKeyword: "Industrial Value Added China", country: "CN" },
+    notes: "CEIC: Industrial Production Index: YoY: Monthly: China (id=314953101).",
   },
 
   // ─── Retail / Consumption ─────────────────────────────────────────────────
@@ -200,26 +230,28 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     label: "Exports YoY %",
     unit: "%",
     category: "trade",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 423075907, searchKeyword: "Total Exports YoY China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A060E0101" },
-    ceic: { searchKeyword: "China Exports Growth", country: "CN" },
+    notes: "CEIC: Total Exports: YoY: Monthly: sa: China (id=423075907).",
   },
   imports_yoy: {
     label: "Imports YoY %",
     unit: "%",
     category: "trade",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 423075917, searchKeyword: "Total Imports YoY China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A060E0201" },
-    ceic: { searchKeyword: "China Imports Growth", country: "CN" },
+    notes: "CEIC: Total Imports: YoY: Monthly: sa: China (id=423075917).",
   },
   trade_balance_usd: {
     label: "Trade Balance USD bn",
     unit: "USD bn",
     category: "trade",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 458962047, searchKeyword: "Trade Balance China", country: "CN", transform: "divide_1000" },
     nbs: { dbcode: "hgyd", code: "A060E0301" },
-    ceic: { searchKeyword: "China Trade Balance", country: "CN" },
-    notes: "Customs GACC data, USD denominated",
+    notes: "CEIC: Trade Balance: USD mn: Monthly: sa: China (id=458962047). Divided by 1000 for bn.",
   },
 
   // ─── Equity Indices ───────────────────────────────────────────────────────
@@ -278,12 +310,11 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     label: "GDP YoY %",
     unit: "%",
     category: "gdp",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 249098001, searchKeyword: "Real GDP YoY China", country: "CN" },
     nbs: { dbcode: "hgjd", code: "A010101" },
-    // FRED: CHNNGDPRNAQISMEI = GDP YoY % change for China (OECD MEI, quarterly)
     fred: { seriesId: "CHNNGDPRNAQISMEI", units: "pc1" },
-    ceic: { searchKeyword: "GDP Growth Rate China Quarterly", country: "CN" },
-    notes: "Quarterly GDP YoY growth rate. FRED fallback: OECD MEI quarterly index.",
+    notes: "CEIC: Real GDP: YoY: Quarterly: China (id=249098001).",
   },
 
   // ─── Fiscal ───────────────────────────────────────────────────────────────
@@ -299,13 +330,13 @@ export const REGISTRY: Record<string, SeriesEntry> = {
 
   // ─── Property ─────────────────────────────────────────────────────────────
   new_home_prices_70city: {
-    label: "New Home Prices 70-city MoM %",
+    label: "House Prices YoY % (CEIC YTD)",
     unit: "%",
     category: "property",
-    fallback: "nbs",
+    fallback: "ceic",
+    ceic: { seriesId: 408940867, searchKeyword: "House Prices YoY China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A0D0101" },
-    ceic: { searchKeyword: "Newly Built Commercial Residential Building Price", country: "CN" },
-    notes: "70-city average new residential price MoM. No FRED equivalent — requires CEIC.",
+    notes: "CEIC: House Prices: YoY: Quarterly: ytd: China (id=408940867). Quarterly cadence vs NBS 70-city monthly.",
   },
   property_starts_ytd: {
     label: "Property New Starts YTD YoY %",
@@ -382,6 +413,177 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     category: "trade",
     fallback: "pending",
     ceic: { searchKeyword: "HS27 Mineral Fuels Imports China", country: "CN" },
+  },
+
+  // ─── NEW: CEIC-unlocked series (Phase 2.5) ────────────────────────────────
+  // These are confirmed subscribed via /series/search?subscribed_only=true (2026-06-02).
+
+  // FX & rates
+  usdcny_monthly: {
+    label: "USD/CNY Exchange Rate (monthly avg)",
+    unit: "CNY/USD",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 260458501, searchKeyword: "Exchange Rate against USD China", country: "CN" },
+    notes: "CEIC: Exchange Rate against USD: Period Avg: Monthly: China (id=260458501).",
+  },
+  policy_rate_7d: {
+    label: "7-Day Reverse Repo Rate (PBoC)",
+    unit: "%",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 372754377, searchKeyword: "7 Day Reverse Repurchase Rate China", country: "CN" },
+    notes: "CEIC: Policy Rate: Month End: 7 Day Reverse Repo (id=372754377).",
+  },
+  rrr_china: {
+    label: "Reserve Requirement Ratio",
+    unit: "%",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 455745437, searchKeyword: "Reserve Requirement Ratio China", country: "CN" },
+    notes: "CEIC: RRR: Local Currency Deposits: China (id=455745437).",
+  },
+  shibor_3m: {
+    label: "SHIBOR 3-Month",
+    unit: "%",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 455961417, searchKeyword: "SHIBOR 3 Months China", country: "CN" },
+    notes: "CEIC: Short Term Interest Rate: SHIBOR 3M (id=455961417).",
+  },
+  cn_1y_bond_yield: {
+    label: "China 1Y Treasury Bond Yield",
+    unit: "%",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 455745427, searchKeyword: "Treasury Bond Yield 1 Year China", country: "CN" },
+    notes: "CEIC: Long Term Interest Rate: Interbank Treasury Bond Yield 1Y (id=455745427).",
+  },
+  fx_reserves_usd: {
+    label: "Foreign Exchange Reserves",
+    unit: "USD bn",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 249097101, searchKeyword: "Foreign Exchange Reserves China", country: "CN", transform: "divide_1000" },
+    notes: "CEIC: FX Reserves: USD mn (id=249097101). Divided by 1000 for bn.",
+  },
+
+  // Money & credit
+  m2_yoy: {
+    label: "M2 Money Supply YoY %",
+    unit: "%",
+    category: "macro",
+    fallback: "ceic",
+    ceic: { seriesId: 414245047, searchKeyword: "M2 YoY China", country: "CN" },
+    notes: "CEIC: M2: YoY: Monthly: sa: China (id=414245047).",
+  },
+
+  // Labor
+  unemployment_rate: {
+    label: "Urban Surveyed Unemployment Rate",
+    unit: "%",
+    category: "kshape",
+    fallback: "ceic",
+    ceic: { seriesId: 487004207, searchKeyword: "Unemployment Rate Monthly China", country: "CN" },
+    notes: "CEIC: Unemployment Rate: Monthly: China (id=487004207).",
+  },
+
+  // Real-economy
+  motor_vehicle_sales: {
+    label: "Motor Vehicle Sales (units, sa)",
+    unit: "units",
+    category: "kshape",
+    fallback: "ceic",
+    ceic: { seriesId: 458914877, searchKeyword: "Motor Vehicle Sales Monthly China", country: "CN" },
+    notes: "CEIC: Motor Vehicle Sales: Monthly: sa: China (id=458914877).",
+  },
+  electricity_generation: {
+    label: "Electricity Generation",
+    unit: "GWh",
+    category: "kshape",
+    fallback: "ceic",
+    ceic: { seriesId: 285666104, searchKeyword: "Electricity Generation Monthly China", country: "CN" },
+    notes: "CEIC: Electricity Generation: Monthly: China (id=285666104).",
+  },
+
+  // External
+  fdi_quarterly: {
+    label: "Foreign Direct Investment (USD mn, quarterly)",
+    unit: "USD mn",
+    category: "trade",
+    fallback: "ceic",
+    ceic: { seriesId: 372405997, searchKeyword: "FDI Quarterly China", country: "CN" },
+    notes: "CEIC: FDI: USD mn: Quarterly: China (id=372405997).",
+  },
+  current_account_pct_gdp: {
+    label: "Current Account % of GDP (quarterly, sa)",
+    unit: "%",
+    category: "trade",
+    fallback: "ceic",
+    ceic: { seriesId: 462162507, searchKeyword: "Current Account Balance China", country: "CN" },
+    notes: "CEIC: Current Account Balance % GDP: Quarterly: sa (id=462162507).",
+  },
+  exports_to_usa: {
+    label: "Exports to USA (USD mn, monthly, sa)",
+    unit: "USD mn",
+    category: "trade",
+    fallback: "ceic",
+    ceic: { seriesId: 459194477, searchKeyword: "Total Exports to USA China", country: "CN" },
+    notes: "CEIC: Total Exports to USA: Monthly: sa (id=459194477). Key US-China decoupling indicator.",
+  },
+  imports_from_usa: {
+    label: "Imports from USA (USD mn, monthly, sa)",
+    unit: "USD mn",
+    category: "trade",
+    fallback: "ceic",
+    ceic: { seriesId: 459199657, searchKeyword: "Total Imports from USA China", country: "CN" },
+    notes: "CEIC: Total Imports from USA: Monthly: sa (id=459199657).",
+  },
+
+  // Hong Kong equity benchmark
+  hangseng_monthly: {
+    label: "Hang Seng Index (month-end, CEIC)",
+    unit: "index",
+    category: "equity",
+    fallback: "ceic",
+    ceic: { seriesId: 455656947, searchKeyword: "Hang Seng Index Monthly", country: "HK" },
+    yahoo: { ticker: "^HSI", interval: "1mo", range: "5y" },
+    notes: "CEIC: Hang Seng Month End (id=455656947). Use hsi_close for daily.",
+  },
+  csi300_monthly: {
+    label: "CSI 300 (month-end, CEIC)",
+    unit: "index",
+    category: "equity",
+    fallback: "ceic",
+    ceic: { seriesId: 455745417, searchKeyword: "Equity Market Index Shanghai Shenzhen 300", country: "CN" },
+    yahoo: { ticker: "000300.SS", interval: "1mo", range: "5y" },
+    notes: "CEIC: Equity Market Index: Shanghai Shenzhen 300 Month End (id=455745417).",
+  },
+
+  // ─── EastMoney direct (Phase 2.5) ─────────────────────────────────────────
+  stock_connect_flow: {
+    label: "Stock Connect Northbound Net Inflow (cumulative, CNY mn)",
+    unit: "CNY mn",
+    category: "equity",
+    fallback: "eastmoney",
+    eastmoney: { clientFn: "getStockConnectFlow", valueField: "totalInflow" },
+    notes: "EastMoney push2his/kamt.kline — 180 trading days. NOTE: HKEX/CSRC stopped real-time Northbound net buy/sell dissemination on 13 May 2024 (see hkex.com.hk/News/Market-Communications/2024/2404122news). Endpoint still returns historical data through that cutoff; current values may be 0. Will need monthly ADT replacement source (e.g. HKEX Insight ADT table) or HKEX historical-daily statistics page.",
+  },
+  margin_balance: {
+    label: "A-share Margin Balance (融资融券余额)",
+    unit: "CNY tn",
+    category: "margins",
+    fallback: "eastmoney",
+    eastmoney: { clientFn: "getMarginBalance", valueField: "rzrqye", divideBy: 1e12 },
+    notes: "EastMoney RPTA_WEB_RZRQ_GGMX — per-stock aggregated to market total. Divide CNY by 1e12 for trillions.",
+  },
+  sector_rotation: {
+    label: "Shenwan L1 Sector Performance (snapshot)",
+    unit: "%",
+    category: "equity",
+    fallback: "eastmoney",
+    eastmoney: { clientFn: "getSectorPerformance" },
+    notes: "EastMoney sector list — 50 Shenwan L1 sectors. Snapshot (not time-series); UI consumes full payload via /api/eastmoney/sectors.",
   },
 };
 

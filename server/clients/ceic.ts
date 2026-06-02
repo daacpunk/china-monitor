@@ -1,8 +1,12 @@
 /**
- * CEIC API client — search and metadata only.
- * Data fetch (getSeriesData) is wired but MUST NOT be called from registry fetch
- * until a subscription is attached. The current key returns UNSUBSCRIBED_SERIES
- * for all data endpoints.
+ * CEIC API client — search, metadata, and DATA (Phase 2.5 unblocked).
+ *
+ * Phase 2.5 discovery (2026-06-02): the key has 9,895 subscribed series including
+ * 71 China, 86 HK, 98 Taiwan headline macro series (CEIC "Global Economic Monitor").
+ * /series/{id}/data WORKS for these. Use `subscribed_only=true` on search to scope.
+ *
+ * Response shape note: /series/{id}/data returns { data: [ { entityId, subscribed,
+ * timePoints: [{date, value, lastUpdateTime}] } ] }, NOT { data: { time_points } }.
  *
  * Auth: ?token=<KEY> query param (NOT Bearer header).
  * Base: https://api.ceicdata.com/v2
@@ -85,6 +89,7 @@ export async function searchSeries(query: {
   country?: string;
   keyword?: string;
   limit?: number;
+  subscribedOnly?: boolean;
 }): Promise<CeicSearchResult[] | { error: "ceiling_blocked"; message: string }> {
   // 1. Check ceiling
   const guard = await checkCeiling("ceic");
@@ -101,7 +106,7 @@ export async function searchSeries(query: {
     return { error: "ceiling_blocked", message: msg };
   }
 
-  const cacheKey = `ceic:search:${query.country ?? ""}:${query.keyword ?? ""}:${query.limit ?? 20}`;
+  const cacheKey = `ceic:search:${query.country ?? ""}:${query.keyword ?? ""}:${query.limit ?? 20}:${query.subscribedOnly ? "sub" : "all"}`;
 
   // 2. Cache lookup
   const cached = await storage.getCache(cacheKey);
@@ -115,20 +120,24 @@ export async function searchSeries(query: {
     const params: Record<string, string | number> = { limit: query.limit ?? 20 };
     if (query.country) params.country = query.country;
     if (query.keyword) params.keyword = query.keyword;
+    if (query.subscribedOnly) params.subscribed_only = "true";
 
     const json = await ceicFetch("/series/search", params);
     const items = json?.data?.items ?? [];
 
-    const results: CeicSearchResult[] = items.map((item: any) => ({
-      id: item?.metadata?.id ?? item?.id,
-      name: item?.metadata?.name ?? item?.name ?? "",
-      frequency: item?.metadata?.frequency ?? "",
-      source: item?.metadata?.source ?? "",
-      country: item?.metadata?.country ?? "",
-      indicator: item?.metadata?.indicator ?? "",
-      unit: item?.metadata?.unit ?? "",
-      subscribed: item?.subscribed === true,
-    }));
+    const results: CeicSearchResult[] = items.map((item: any) => {
+      const meta = item?.metadata ?? {};
+      return {
+        id: meta.id ?? item?.id,
+        name: meta.name ?? "",
+        frequency: meta?.frequency?.name ?? meta?.frequency?.id ?? "",
+        source: meta?.source?.name ?? "",
+        country: meta?.country?.id ?? meta?.country?.name ?? "",
+        indicator: Array.isArray(meta?.indicators) && meta.indicators[0]?.[0]?.name ? meta.indicators[0][0].name : "",
+        unit: meta?.unit?.name ?? "",
+        subscribed: item?.subscribed === true,
+      };
+    });
 
     // 4. Cache
     const expires = new Date(Date.now() + TTL_MS);
@@ -179,15 +188,17 @@ export async function getSeriesMetadata(id: string | number): Promise<CeicMetaRe
       return { error: "not_found" };
     }
 
-    const meta = json?.data ?? json;
+    // Response shape: { data: [ { entityId, subscribed, metadata: {...} } ] }
+    const entry = Array.isArray(json?.data) ? json.data[0] : json?.data;
+    const meta = entry?.metadata ?? entry ?? {};
     const result: CeicMetadata = {
       id: meta.id ?? id,
       name: meta.name ?? "",
-      frequency: meta.frequency ?? "",
-      source: meta.source ?? "",
-      country: meta.country ?? "",
-      indicator: meta.indicator ?? "",
-      unit: meta.unit ?? "",
+      frequency: meta?.frequency?.name ?? meta?.frequency?.id ?? "",
+      source: meta?.source?.name ?? "",
+      country: meta?.country?.id ?? meta?.country?.name ?? "",
+      indicator: Array.isArray(meta?.indicators) && meta.indicators[0]?.[0]?.name ? meta.indicators[0][0].name : "",
+      unit: meta?.unit?.name ?? "",
       startDate: meta.startDate,
       endDate: meta.endDate,
     };
@@ -258,10 +269,20 @@ export async function getSeriesData(
       return { error: "other", message: msg };
     }
 
-    const timePoints: CeicTimePoint[] = (json?.data?.time_points ?? []).map((tp: any) => ({
+    // CRITICAL: response shape is { data: [ { entityId, subscribed, timePoints: [...] } ] }
+    // NOT { data: { time_points: [...] } }. Phase 2.5 fix.
+    const dataArr = Array.isArray(json?.data) ? json.data : [];
+    const firstEntity = dataArr[0] ?? {};
+    const rawPoints = firstEntity.timePoints ?? firstEntity.time_points ?? [];
+    const timePoints: CeicTimePoint[] = rawPoints.map((tp: any) => ({
       date: tp.date,
       value: tp.value != null ? Number(tp.value) : null,
     }));
+
+    // If entity says subscribed=false explicitly, surface as unsubscribed error
+    if (firstEntity.subscribed === false && timePoints.length === 0) {
+      return { error: "unsubscribed", message: `Series ${id} not in subscription` };
+    }
 
     await storage.setCache(cacheKey, timePoints, new Date(Date.now() + TTL_MS), "ceic");
     await recordCall({

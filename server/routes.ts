@@ -409,5 +409,69 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(await storage.listWatchlists());
   });
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // EastMoney public data endpoints (no auth required)
+  // Cache-Control: public, max-age=900 (15 min — equity data refreshes intraday)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  const emCache = "public, max-age=900";
+
+  /** GET /api/eastmoney/health — connectivity check */
+  app.get("/api/eastmoney/health", (_req, res) => {
+    res.setHeader("Cache-Control", emCache);
+    res.json({ status: "ok", endpoints: 4 });
+  });
+
+  /** GET /api/eastmoney/connect — Stock Connect northbound flow */
+  app.get("/api/eastmoney/connect", async (_req, res) => {
+    try {
+      const { getStockConnectFlow } = await import("./clients/eastmoney");
+      const result = await getStockConnectFlow();
+      res.setHeader("Cache-Control", emCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ source: "eastmoney", series: [], error: err.message });
+    }
+  });
+
+  /** GET /api/eastmoney/margin — Margin balance (融资融券余额) */
+  app.get("/api/eastmoney/margin", async (_req, res) => {
+    try {
+      const { getMarginBalance } = await import("./clients/eastmoney");
+      const result = await getMarginBalance();
+      res.setHeader("Cache-Control", emCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ source: "eastmoney", series: [], error: err.message });
+    }
+  });
+
+  /** GET /api/eastmoney/sectors — Shenwan L1 sector rotation snapshot */
+  app.get("/api/eastmoney/sectors", async (_req, res) => {
+    try {
+      const { getSectorPerformance } = await import("./clients/eastmoney");
+      const result = await getSectorPerformance();
+      res.setHeader("Cache-Control", emCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ source: "eastmoney", series: [], error: err.message });
+    }
+  });
+
+  /** GET /api/eastmoney/kline/:secid?beg=YYYYMMDD&end=YYYYMMDD — Index OHLCV kline */
+  app.get("/api/eastmoney/kline/:secid", async (req, res) => {
+    try {
+      const { getEastMoneyKline } = await import("./clients/eastmoney");
+      const secid = req.params.secid;
+      const beg = req.query.beg ? String(req.query.beg) : undefined;
+      const end = req.query.end ? String(req.query.end) : undefined;
+      const result = await getEastMoneyKline(secid, beg, end);
+      res.setHeader("Cache-Control", emCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ source: "eastmoney", series: [], error: err.message });
+    }
+  });
+
   return httpServer;
 }
