@@ -473,5 +473,127 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── HKEX (Phase 2.5) ──────────────────────────────────────────────────
+  /** GET /api/hkex/stock-connect/monthly — 13 rolling months of NB/SB ADT */
+  app.get("/api/hkex/stock-connect/monthly", async (_req, res) => {
+    try {
+      const { getStockConnectMonthlyAdt } = await import("./clients/hkex");
+      const result = await getStockConnectMonthlyAdt();
+      // Monthly data — 6h cache TTL is plenty
+      res.setHeader("Cache-Control", "public, max-age=21600");
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ source: "hkex", series: [], error: err.message });
+    }
+  });
+
+  // ─── Imports / FactSet (Phase 2.5) ─────────────────────────────────────
+  // The user has FactSet workstation but no API access, so we accept pasted
+  // or uploaded CSV text and store the points in the `imported_series` table.
+  // Once imported, series flow through the normal /api/series/:logicalId path
+  // when `logicalId` begins with `imported:` (handled in fetchSeries).
+
+  /**
+   * POST /api/imports/factset
+   * Body: { text: string, sourceName?: "factset" | "bloomberg" | "manual", dryRun?: boolean }
+   * Returns: { ok, format, delimiter, seriesIds, rowCount, warnings, sample[] }
+   *          plus { inserted } when not dryRun.
+   */
+  app.post("/api/imports/factset", async (req, res) => {
+    try {
+      const Body = z.object({
+        text: z.string().min(1),
+        sourceName: z.enum(["factset", "bloomberg", "manual"]).default("factset"),
+        dryRun: z.boolean().default(false),
+      });
+      const parsed = Body.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ ok: false, error: parsed.error.message });
+      }
+      const { parseFactsetCsv } = await import("./clients/factsetImport");
+      const result = parseFactsetCsv(parsed.data.text, { sourceName: parsed.data.sourceName });
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+      const sample = result.rows.slice(0, 5);
+      if (parsed.data.dryRun) {
+        return res.json({
+          ok: true,
+          dryRun: true,
+          format: result.format,
+          delimiter: result.delimiter,
+          seriesIds: result.seriesIds,
+          rowCount: result.rows.length,
+          warnings: result.warnings,
+          sample,
+        });
+      }
+      const inserted = await storage.upsertImportedSeriesBatch(result.rows);
+      res.json({
+        ok: true,
+        format: result.format,
+        delimiter: result.delimiter,
+        seriesIds: result.seriesIds,
+        rowCount: result.rows.length,
+        inserted,
+        warnings: result.warnings,
+        sample,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /** GET /api/imports/series — list all imported series ids with metadata */
+  app.get("/api/imports/series", async (_req, res) => {
+    try {
+      const list = await storage.listImportedSeriesIds();
+      res.json({ ok: true, series: list });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /** GET /api/imports/series/:seriesId — full point series, newest first */
+  app.get("/api/imports/series/:seriesId", async (req, res) => {
+    try {
+      const rows = await storage.getImportedSeries(req.params.seriesId);
+      if (!rows.length) return res.status(404).json({ ok: false, error: "Series not found" });
+      res.json({
+        ok: true,
+        seriesId: req.params.seriesId,
+        seriesLabel: rows[0].seriesLabel,
+        unit: rows[0].unit,
+        frequency: rows[0].frequency,
+        sourceName: rows[0].sourceName,
+        sourceMnemonic: rows[0].sourceMnemonic,
+        points: rows.map((r) => ({ date: r.date, value: Number(r.value) })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /** DELETE /api/imports/series/:seriesId — remove all points for one series */
+  app.delete("/api/imports/series/:seriesId", async (req, res) => {
+    try {
+      const n = await storage.deleteImportedSeries(req.params.seriesId);
+      res.json({ ok: true, deleted: n });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /** GET /api/imports/template.csv — sample CSV template download */
+  app.get("/api/imports/template.csv", async (_req, res) => {
+    const { FACTSET_LONG_TEMPLATE_CSV } = await import("./clients/factsetImport");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="factset_import_template.csv"',
+    );
+    res.send(FACTSET_LONG_TEMPLATE_CSV);
+  });
+
   return httpServer;
 }

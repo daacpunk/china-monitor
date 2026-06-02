@@ -11,6 +11,7 @@ import {
   Telescope,
   Settings,
   Receipt,
+  Upload,
   Moon,
   Sun,
   Monitor,
@@ -32,6 +33,7 @@ const SECTIONS: Array<{ slug: string; label: string; icon: any; group: string }>
 ];
 
 const SYSTEM_LINKS = [
+  { slug: "/imports", label: "Imports", icon: Upload },
   { slug: "/audit", label: "Audit Trail", icon: Receipt },
   { slug: "/settings", label: "Settings", icon: Settings },
 ];

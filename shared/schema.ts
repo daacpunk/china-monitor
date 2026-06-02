@@ -8,6 +8,7 @@ import {
   boolean,
   doublePrecision,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -171,3 +172,32 @@ export const insertViewStateSchema = createInsertSchema(viewState).pick({
 });
 export type InsertViewState = z.infer<typeof insertViewStateSchema>;
 export type ViewState = typeof viewState.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Imported series — user-uploaded data (FactSet workstation CSV/XLSX exports,
+// Bloomberg saves, manual entries). One row per (seriesId, date) point.
+// Composite primary key (series_id, date) enables idempotent upserts.
+// ─────────────────────────────────────────────────────────────────────────────
+export const importedSeries = pgTable(
+  "imported_series",
+  {
+    seriesId: text("series_id").notNull(),
+    seriesLabel: text("series_label").notNull(),
+    date: text("date").notNull(), // ISO YYYY-MM-DD; stored as text for simplicity
+    value: doublePrecision("value").notNull(),
+    sourceMnemonic: text("source_mnemonic"), // e.g. FactSet identifier
+    unit: text("unit"),
+    frequency: text("frequency"), // 'M' | 'Q' | 'A' | 'D' | 'W'
+    importedAt: timestamp("imported_at").notNull().defaultNow(),
+    sourceName: text("source_name").notNull().default("factset"), // 'factset' | 'bloomberg' | 'manual'
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.seriesId, t.date] }),
+    seriesIdx: index("imported_series_id_idx").on(t.seriesId),
+  }),
+);
+export const insertImportedSeriesSchema = createInsertSchema(importedSeries).omit({
+  importedAt: true,
+});
+export type InsertImportedSeries = z.infer<typeof insertImportedSeriesSchema>;
+export type ImportedSeries = typeof importedSeries.$inferSelect;

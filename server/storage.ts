@@ -7,6 +7,7 @@ import {
   watchlists,
   chartConfigs,
   viewState,
+  importedSeries,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -24,6 +25,8 @@ import type {
   InsertChartConfig,
   ViewState,
   InsertViewState,
+  ImportedSeries,
+  InsertImportedSeries,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -139,6 +142,19 @@ export async function bootstrapSchema(): Promise<void> {
       value_json JSONB NOT NULL,
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     )`,
+    `CREATE TABLE IF NOT EXISTS imported_series (
+      series_id TEXT NOT NULL,
+      series_label TEXT NOT NULL,
+      date TEXT NOT NULL,
+      value DOUBLE PRECISION NOT NULL,
+      source_mnemonic TEXT,
+      unit TEXT,
+      frequency TEXT,
+      imported_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      source_name TEXT NOT NULL DEFAULT 'factset',
+      PRIMARY KEY (series_id, date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS imported_series_id_idx ON imported_series(series_id)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -206,6 +222,25 @@ export interface IStorage {
   // View state
   setViewState(input: InsertViewState): Promise<ViewState>;
   getViewState(key: string): Promise<ViewState | undefined>;
+
+  // Imported series (FactSet, Bloomberg, manual)
+  upsertImportedSeriesBatch(rows: InsertImportedSeries[]): Promise<{ inserted: number; updated: number }>;
+  listImportedSeriesIds(): Promise<
+    Array<{
+      seriesId: string;
+      seriesLabel: string;
+      sourceName: string;
+      sourceMnemonic: string | null;
+      unit: string | null;
+      frequency: string | null;
+      pointCount: number;
+      latestDate: string | null;
+      latestValue: number | null;
+      importedAt: Date;
+    }>
+  >;
+  getImportedSeries(seriesId: string): Promise<ImportedSeries[]>;
+  deleteImportedSeries(seriesId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -471,6 +506,98 @@ export class DatabaseStorage implements IStorage {
   async getViewState(key: string): Promise<ViewState | undefined> {
     const rows = await (db as any).select().from(viewState).where(eq(viewState.key, key));
     return rows[0];
+  }
+
+  // Imported series
+  async upsertImportedSeriesBatch(
+    rows: InsertImportedSeries[],
+  ): Promise<{ inserted: number; updated: number }> {
+    if (rows.length === 0) return { inserted: 0, updated: 0 };
+    // We don't get insert-vs-update distinction cheaply; report total as inserted on conflict-do-update.
+    // Use ON CONFLICT DO UPDATE so re-imports refresh values.
+    let affected = 0;
+    for (const r of rows) {
+      await (db as any).execute(sql`
+        INSERT INTO imported_series
+          (series_id, series_label, date, value, source_mnemonic, unit, frequency, source_name)
+        VALUES (
+          ${r.seriesId}, ${r.seriesLabel}, ${r.date}, ${r.value},
+          ${r.sourceMnemonic ?? null}, ${r.unit ?? null}, ${r.frequency ?? null},
+          ${r.sourceName ?? "factset"}
+        )
+        ON CONFLICT (series_id, date) DO UPDATE SET
+          series_label = EXCLUDED.series_label,
+          value = EXCLUDED.value,
+          source_mnemonic = EXCLUDED.source_mnemonic,
+          unit = EXCLUDED.unit,
+          frequency = EXCLUDED.frequency,
+          source_name = EXCLUDED.source_name,
+          imported_at = NOW()
+      `);
+      affected += 1;
+    }
+    return { inserted: affected, updated: 0 };
+  }
+
+  async listImportedSeriesIds() {
+    const result: any = await (db as any).execute(sql`
+      SELECT series_id          AS "seriesId",
+             MAX(series_label)   AS "seriesLabel",
+             MAX(source_name)    AS "sourceName",
+             MAX(source_mnemonic) AS "sourceMnemonic",
+             MAX(unit)           AS "unit",
+             MAX(frequency)      AS "frequency",
+             COUNT(*)::int       AS "pointCount",
+             MAX(date)           AS "latestDate",
+             MAX(imported_at)    AS "importedAt"
+        FROM imported_series
+       GROUP BY series_id
+       ORDER BY MAX(imported_at) DESC
+    `);
+    const rows = result.rows ?? result;
+    // For latestValue, fetch the value at MAX(date) per series in a second pass (cheap, few rows).
+    const out: any[] = [];
+    for (const r of rows) {
+      const v: any = await (db as any).execute(
+        sql`SELECT value FROM imported_series WHERE series_id = ${r.seriesId} AND date = ${r.latestDate}`,
+      );
+      const vrows = v.rows ?? v;
+      out.push({
+        seriesId: r.seriesId,
+        seriesLabel: r.seriesLabel,
+        sourceName: r.sourceName,
+        sourceMnemonic: r.sourceMnemonic,
+        unit: r.unit,
+        frequency: r.frequency,
+        pointCount: Number(r.pointCount ?? 0),
+        latestDate: r.latestDate,
+        latestValue: vrows[0]?.value != null ? Number(vrows[0].value) : null,
+        importedAt: r.importedAt,
+      });
+    }
+    return out;
+  }
+
+  async getImportedSeries(seriesId: string): Promise<ImportedSeries[]> {
+    const rows = await (db as any)
+      .select()
+      .from(importedSeries)
+      .where(eq(importedSeries.seriesId, seriesId))
+      .orderBy(desc(importedSeries.date));
+    return rows;
+  }
+
+  async deleteImportedSeries(seriesId: string): Promise<number> {
+    // Get count first so we can return it regardless of driver-specific result shape.
+    const cnt: any = await (db as any).execute(
+      sql`SELECT COUNT(*)::int AS c FROM imported_series WHERE series_id = ${seriesId}`,
+    );
+    const rows = cnt.rows ?? cnt;
+    const before = Number(rows[0]?.c ?? 0);
+    await (db as any).execute(
+      sql`DELETE FROM imported_series WHERE series_id = ${seriesId}`,
+    );
+    return before;
   }
 }
 

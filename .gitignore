@@ -15,4 +15,7 @@ data.pgdata/
 !.env.example
 
 *.log
+
+# Local CEIC probe dumps (large, regenerable)
+ceic_subscribed_*.json
 .DS_Store

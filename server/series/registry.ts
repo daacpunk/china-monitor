@@ -13,7 +13,7 @@
  * direct seriesId mapping (`ceic.seriesId`). Falls back to FRED/Yahoo if CEIC fails.
  */
 
-export type DataSourceName = "ceic" | "nbs" | "fred" | "eastmoney" | "yahoo" | "stooq" | "pending";
+export type DataSourceName = "ceic" | "nbs" | "fred" | "oecd" | "hkex" | "eastmoney" | "yahoo" | "stooq" | "pending";
 export type SeriesCategory =
   | "fai"
   | "margins"
@@ -74,6 +74,29 @@ export interface FredConfig {
 }
 
 /**
+ * OECD SDMX REST config.
+ * `dataflowAndKey` is the URL path segment after /data/ — e.g.
+ *   "OECD.SDD.STES,DSD_STES@DF_CLI,4.1/CHN.M.LI...AA.IX..H"
+ */
+export interface OecdConfig {
+  dataflowAndKey: string;
+  startPeriod?: string;
+}
+
+/**
+ * HKEX monthly Stock Connect statistics config.
+ * Currently only one logical series uses this (stock_connect_flow), so config is minimal.
+ */
+export interface HkexConfig {
+  /**
+   * Which composite ADT field to map into TimePoint.value.
+   *   "totalNorthboundAdt" — SSE+SZSE Northbound Avg Daily Turnover (RMB mn)
+   *   "totalSouthboundAdt" — SSE+SZSE Southbound Avg Daily Turnover (HKD mn)
+   */
+  valueField: "totalNorthboundAdt" | "totalSouthboundAdt";
+}
+
+/**
  * EastMoney (东方财富) free-API config — direct A-share/HK flow data.
  * Each client function returns a richer payload than a single TimePoint stream,
  * so the registry picks ONE field as the canonical TimePoint value, and the
@@ -103,6 +126,8 @@ export interface SeriesEntry {
   ceic?: CeicConfig;
   nbs?: NbsConfig;
   fred?: FredConfig;   // FRED fallback when NBS is unreachable (overseas IP)
+  oecd?: OecdConfig;
+  hkex?: HkexConfig;
   eastmoney?: EastMoneyConfig;
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
@@ -562,12 +587,20 @@ export const REGISTRY: Record<string, SeriesEntry> = {
 
   // ─── EastMoney direct (Phase 2.5) ─────────────────────────────────────────
   stock_connect_flow: {
-    label: "Stock Connect Northbound Net Inflow (cumulative, CNY mn)",
-    unit: "CNY mn",
+    label: "Stock Connect Northbound ADT (monthly, RMB mn)",
+    unit: "RMB mn",
     category: "equity",
-    fallback: "eastmoney",
-    eastmoney: { clientFn: "getStockConnectFlow", valueField: "totalInflow" },
-    notes: "EastMoney push2his/kamt.kline — 180 trading days. NOTE: HKEX/CSRC stopped real-time Northbound net buy/sell dissemination on 13 May 2024 (see hkex.com.hk/News/Market-Communications/2024/2404122news). Endpoint still returns historical data through that cutoff; current values may be 0. Will need monthly ADT replacement source (e.g. HKEX Insight ADT table) or HKEX historical-daily statistics page.",
+    fallback: "hkex",
+    hkex: { valueField: "totalNorthboundAdt" },
+    notes: "HKEX official monthly Average Daily Turnover (SSE+SZSE Northbound). 13 rolling months. Replaces EastMoney push2his/kamt.kline (HKEX stopped real-time NB net buy/sell dissemination on 13 May 2024).",
+  },
+  stock_connect_southbound: {
+    label: "Stock Connect Southbound ADT (monthly, HKD mn)",
+    unit: "HKD mn",
+    category: "equity",
+    fallback: "hkex",
+    hkex: { valueField: "totalSouthboundAdt" },
+    notes: "HKEX official monthly Average Daily Turnover (SSE+SZSE Southbound). 13 rolling months.",
   },
   margin_balance: {
     label: "A-share Margin Balance (融资融券余额)",
@@ -584,6 +617,41 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     fallback: "eastmoney",
     eastmoney: { clientFn: "getSectorPerformance" },
     notes: "EastMoney sector list — 50 Shenwan L1 sectors. Snapshot (not time-series); UI consumes full payload via /api/eastmoney/sectors.",
+  },
+
+  // ─── OECD SDMX (Phase 2.5) ──────────────────────────────────────────
+  oecd_cli_china: {
+    label: "OECD Composite Leading Indicator — China (amplitude-adjusted)",
+    unit: "index (100 = trend)",
+    category: "macro",
+    fallback: "oecd",
+    oecd: {
+      dataflowAndKey: "OECD.SDD.STES,DSD_STES@DF_CLI,4.1/CHN.M.LI...AA.IX..H",
+      startPeriod: "2020-01",
+    },
+    notes: "OECD CLI monthly, amplitude-adjusted. Forward-looking indicator; values >100 imply above-trend growth.",
+  },
+  oecd_bci_china: {
+    label: "OECD Business Confidence Indicator — China",
+    unit: "index (100 = neutral)",
+    category: "macro",
+    fallback: "oecd",
+    oecd: {
+      dataflowAndKey: "OECD.SDD.STES,DSD_STES@DF_CLI,4.1/CHN.M.BCICP...AA.IX..H",
+      startPeriod: "2020-01",
+    },
+    notes: "OECD BCI monthly, amplitude-adjusted.",
+  },
+  oecd_cci_china: {
+    label: "OECD Consumer Confidence Indicator — China",
+    unit: "index (100 = neutral)",
+    category: "macro",
+    fallback: "oecd",
+    oecd: {
+      dataflowAndKey: "OECD.SDD.STES,DSD_STES@DF_CLI,4.1/CHN.M.CCICP...AA.IX..H",
+      startPeriod: "2020-01",
+    },
+    notes: "OECD CCI monthly, amplitude-adjusted.",
   },
 };
 

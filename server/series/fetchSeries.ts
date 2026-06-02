@@ -16,6 +16,8 @@ import {
   getMarginBalance,
   getSectorPerformance,
 } from "../clients/eastmoney";
+import { getStockConnectMonthlyAdt } from "../clients/hkex";
+import { getOecdSeries } from "../clients/oecd";
 
 export interface TimePoint {
   date: string;
@@ -23,7 +25,18 @@ export interface TimePoint {
 }
 
 export interface Provenance {
-  source: "ceic" | "nbs" | "fred" | "eastmoney" | "stooq" | "yahoo" | "pending" | "static";
+  source:
+    | "ceic"
+    | "nbs"
+    | "fred"
+    | "oecd"
+    | "hkex"
+    | "eastmoney"
+    | "stooq"
+    | "yahoo"
+    | "pending"
+    | "static"
+    | "imported";
   lastUpdated: string; // ISO timestamp
   subscribed: boolean;
   cacheHit: boolean;
@@ -61,8 +74,62 @@ function applyCeicTransform(points: TimePoint[], transform: CeicConfig["transfor
  * Tries sources in priority order, returns first successful result.
  */
 export async function fetchSeries(logicalId: string, _opts?: { count?: number; startDate?: string }): Promise<SeriesResult> {
-  const entry = getEntry(logicalId);
   const now = new Date().toISOString();
+
+  // ─── Imported series (FactSet / Bloomberg / manual) ──────────────────────
+  // Convention: logicalIds prefixed with `imported:` resolve from the
+  // `imported_series` table (user CSV uploads). Always wins — user-imported
+  // data is treated as authoritative.
+  if (logicalId.startsWith("imported:")) {
+    const seriesId = logicalId.slice("imported:".length);
+    try {
+      const { storage } = await import("../storage");
+      const rows = await storage.getImportedSeries(seriesId);
+      if (rows.length === 0) {
+        return {
+          data: [],
+          provenance: {
+            source: "imported",
+            lastUpdated: now,
+            subscribed: false,
+            cacheHit: false,
+            error: `No imported data for series_id: ${seriesId}`,
+          },
+        };
+      }
+      // Storage returns newest-first; preserve that for consistency with CEIC.
+      const data: TimePoint[] = rows.map((r: any) => ({
+        date: r.date,
+        value: r.value != null ? Number(r.value) : null,
+      }));
+      const latestImport = rows.reduce(
+        (acc: Date, r: any) => (r.importedAt > acc ? r.importedAt : acc),
+        new Date(0),
+      );
+      return {
+        data,
+        provenance: {
+          source: "imported",
+          lastUpdated: latestImport.toISOString?.() ?? now,
+          subscribed: true,
+          cacheHit: false,
+        },
+      };
+    } catch (err: any) {
+      return {
+        data: [],
+        provenance: {
+          source: "imported",
+          lastUpdated: now,
+          subscribed: false,
+          cacheHit: false,
+          error: `Imported lookup failed: ${err?.message ?? err}`,
+        },
+      };
+    }
+  }
+
+  const entry = getEntry(logicalId);
 
   if (!entry) {
     return {
@@ -117,7 +184,62 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
     }
   }
 
-  // ─── Try EastMoney (Phase 2.5, before NBS) ──────────────────────────────
+  // ─── Try HKEX (Phase 2.5) — monthly Stock Connect ADT ───────────────────
+  if (entry.hkex) {
+    try {
+      const payload = await getStockConnectMonthlyAdt();
+      if (!("error" in payload && payload.error) && payload.series.length > 0) {
+        const field = entry.hkex.valueField;
+        const points: TimePoint[] = payload.series
+          .filter((r) => r.date && typeof (r as any)[field] === "number")
+          .map((r) => ({ date: r.date, value: (r as any)[field] as number }));
+        if (points.length > 0) {
+          return {
+            data: points,
+            provenance: {
+              source: "hkex",
+              lastUpdated: now,
+              subscribed: false,
+              cacheHit: false,
+            },
+          };
+        }
+      }
+      if ("error" in payload && payload.error) {
+        console.warn(`[fetchSeries] HKEX for ${logicalId}: ${payload.error}`);
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] HKEX failed for ${logicalId}:`, err.message);
+    }
+  }
+
+  // ─── Try OECD SDMX (Phase 2.5) ────────────────────────────────────────
+  if (entry.oecd) {
+    try {
+      const payload = await getOecdSeries(entry.oecd.dataflowAndKey, {
+        startPeriod: entry.oecd.startPeriod,
+      });
+      if (!("error" in payload && payload.error) && payload.series.length > 0) {
+        const points: TimePoint[] = payload.series.map((p) => ({ date: p.date, value: p.value }));
+        return {
+          data: points,
+          provenance: {
+            source: "oecd",
+            lastUpdated: now,
+            subscribed: false,
+            cacheHit: false,
+          },
+        };
+      }
+      if ("error" in payload && payload.error) {
+        console.warn(`[fetchSeries] OECD for ${logicalId}: ${payload.error}`);
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] OECD failed for ${logicalId}:`, err.message);
+    }
+  }
+
+  // ─── Try EastMoney (Phase 2.5) ──────────────────────────────────────────
   if (entry.eastmoney) {
     try {
       const cfg = entry.eastmoney;
