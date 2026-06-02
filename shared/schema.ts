@@ -201,3 +201,39 @@ export const insertImportedSeriesSchema = createInsertSchema(importedSeries).omi
 });
 export type InsertImportedSeries = z.infer<typeof insertImportedSeriesSchema>;
 export type ImportedSeries = typeof importedSeries.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenarios — Phase 3b. Single base + bull + bear, 1Q forward. Each scenario
+// gets one row per generation; the latest row for a target_quarter is canonical.
+// hitRateJson is populated when the target quarter resolves (post-hoc scoring).
+// ─────────────────────────────────────────────────────────────────────────────
+export const scenarios = pgTable(
+  "scenarios",
+  {
+    id: serial("id").primaryKey(),
+    generatedAt: timestamp("generated_at").notNull().defaultNow(),
+    targetQuarter: text("target_quarter").notNull(), // 'YYYY-Qn'
+    baseCase: jsonb("base_case").notNull(),          // { narrative, drivers: {ppi:{value, dir}, ...}, equityCalls: {csi300:{level,reasoning}, ...} }
+    bullCase: jsonb("bull_case").notNull(),
+    bearCase: jsonb("bear_case").notNull(),
+    baseProb: doublePrecision("base_prob").notNull().default(0.5),
+    bullProb: doublePrecision("bull_prob").notNull().default(0.25),
+    bearProb: doublePrecision("bear_prob").notNull().default(0.25),
+    inputsJson: jsonb("inputs_json").notNull(),      // snapshot of trends/anomalies fed to LLM
+    model: text("model").notNull(),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    userEdited: boolean("user_edited").notNull().default(false),
+    hitRateJson: jsonb("hit_rate_json"),             // null until quarter resolves
+  },
+  (t) => ({
+    quarterIdx: index("scenarios_quarter_idx").on(t.targetQuarter),
+    generatedIdx: index("scenarios_generated_idx").on(t.generatedAt),
+  }),
+);
+
+export const insertScenarioSchema = createInsertSchema(scenarios).omit({
+  id: true,
+  generatedAt: true,
+});
+export type InsertScenario = z.infer<typeof insertScenarioSchema>;
+export type Scenario = typeof scenarios.$inferSelect;

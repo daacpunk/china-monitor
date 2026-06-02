@@ -866,5 +866,226 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.send(FACTSET_LONG_TEMPLATE_CSV);
   });
 
+  // ─── Trends (Phase 3b) ─────────────────────────────────────────
+  /** POST /api/trends/detect
+   *  Body: { ids: string[]; windows?: [3,6,12]; regimeWindow?: number }
+   *  Returns per-series trend results + cross-source confirmation summary.
+   */
+  app.post("/api/trends/detect", async (req, res) => {
+    try {
+      const Body = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(40),
+        windows: z.tuple([z.number().int().positive(), z.number().int().positive(), z.number().int().positive()]).optional(),
+        regimeWindow: z.number().int().positive().max(120).optional(),
+      });
+      const body = Body.parse(req.body);
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { detectTrend, crossSourceConfirmation } = await import("./analysis/trends");
+      const results = await Promise.all(body.ids.map(async (id) => {
+        const r = await fetchSeries(id);
+        return detectTrend(id, r.data, { windows: body.windows, regimeWindow: body.regimeWindow });
+      }));
+      const summary = crossSourceConfirmation(results);
+      res.json({ results, summary });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ─── Attribution (Phase 3b) ─────────────────────────────────────
+  /** POST /api/attribution/macro-to-equity
+   *  Body: { drivers?: string[]; equities?: string[]; pairs?: Array<{driver,equity}> }
+   *  If pairs is omitted, uses curated SECTOR_MAPPING (filtered to A-share + HK).
+   *  Returns per-pair rolling betas + lead/lag + 'not yet priced' flags.
+   */
+  app.post("/api/attribution/macro-to-equity", async (req, res) => {
+    try {
+      const Body = z.object({
+        pairs: z.array(z.object({ driver: z.string(), equity: z.string() })).max(40).optional(),
+      });
+      const body = Body.parse(req.body);
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { SECTOR_MAPPING, computePair, inferDriverKind, EQUITY_UNIVERSE } = await import("./analysis/attribution");
+
+      // Build the list of pairs to compute
+      const requestedPairs = body.pairs && body.pairs.length > 0
+        ? body.pairs.map((p) => {
+            const found = SECTOR_MAPPING.find((m) => m.driver === p.driver && m.equityTarget === p.equity);
+            return found ?? {
+              driver: p.driver,
+              driverLabel: p.driver,
+              equityTarget: p.equity,
+              equityLabel: p.equity,
+              expectedSign: 1 as const,
+              thesis: "User-specified pair.",
+            };
+          })
+        : SECTOR_MAPPING;
+
+      // Fetch unique series only once
+      const uniqueIds = new Set<string>();
+      for (const p of requestedPairs) {
+        uniqueIds.add(p.driver);
+        uniqueIds.add(p.equityTarget);
+      }
+      const cache = new Map<string, Awaited<ReturnType<typeof fetchSeries>>>();
+      await Promise.all(Array.from(uniqueIds).map(async (id) => {
+        cache.set(id, await fetchSeries(id));
+      }));
+
+      const pairs: NonNullable<ReturnType<typeof computePair>>[] = [];
+      const skipped: Array<{ driver: string; equity: string; reason: string }> = [];
+      for (const p of requestedPairs) {
+        const d = cache.get(p.driver);
+        const e = cache.get(p.equityTarget);
+        if (!d || !e) {
+          skipped.push({ driver: p.driver, equity: p.equityTarget, reason: "fetch returned no data" });
+          continue;
+        }
+        const pair = computePair(p, d.data, inferDriverKind(p.driver), e.data);
+        if (!pair) {
+          skipped.push({ driver: p.driver, equity: p.equityTarget, reason: "<6 aligned observations" });
+          continue;
+        }
+        pairs.push(pair);
+      }
+
+      const notPriced = pairs.filter((p) => p.notPriced.triggered);
+      res.json({ pairs, notPriced, skipped, universe: EQUITY_UNIVERSE });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ─── Scenarios (Phase 3b) ───────────────────────────────────────
+  /** POST /api/scenarios/generate
+   *  Body: { model?: LlmModel; drivers?: string[]; equities?: string[]; targetQuarter?: string }
+   *  Generates a base/bull/bear scenario, persists it, returns the row.
+   */
+  app.post("/api/scenarios/generate", async (req, res) => {
+    try {
+      const Body = z.object({
+        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        drivers: z.array(z.string()).optional(),
+        equities: z.array(z.string()).optional(),
+        targetQuarter: z.string().regex(/^\d{4}-Q[1-4]$/).optional(),
+      });
+      const body = Body.parse(req.body);
+      const { generateScenario } = await import("./analysis/scenarios");
+      const result = await generateScenario(body);
+      const row = await storage.createScenario({
+        targetQuarter: result.output.targetQuarter,
+        baseCase: result.output.base as any,
+        bullCase: result.output.bull as any,
+        bearCase: result.output.bear as any,
+        baseProb: result.output.baseProb,
+        bullProb: result.output.bullProb,
+        bearProb: result.output.bearProb,
+        inputsJson: result.inputs as any,
+        model: result.model,
+        costUsd: result.costUsd,
+        userEdited: false,
+        hitRateJson: null,
+      });
+      res.json({ scenario: row, costUsd: result.costUsd, cacheHit: result.cacheHit, tokensIn: result.tokensIn, tokensOut: result.tokensOut });
+    } catch (err: any) {
+      const msg = err.message || String(err);
+      const status = msg.includes("Blocked by cost ceiling") ? 429 : msg.includes("No API key") ? 412 : 500;
+      res.status(status).json({ error: msg });
+    }
+  });
+
+  /** GET /api/scenarios — list recent scenarios */
+  app.get("/api/scenarios", async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit ?? 20), 100);
+      const list = await storage.listScenarios(limit);
+      res.json({ scenarios: list });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/scenarios/latest?quarter=YYYY-Qn */
+  app.get("/api/scenarios/latest", async (req, res) => {
+    try {
+      const { nextQuarter } = await import("./analysis/scenarios");
+      const q = (req.query.quarter as string) || nextQuarter();
+      const s = await storage.getLatestScenarioForQuarter(q);
+      if (!s) return res.status(404).json({ error: `No scenario for ${q}` });
+      res.json({ scenario: s });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** PATCH /api/scenarios/:id — user edits to cases or probability weights */
+  app.patch("/api/scenarios/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const Body = z.object({
+        baseCase: z.any().optional(),
+        bullCase: z.any().optional(),
+        bearCase: z.any().optional(),
+        baseProb: z.number().min(0).max(1).optional(),
+        bullProb: z.number().min(0).max(1).optional(),
+        bearProb: z.number().min(0).max(1).optional(),
+      });
+      const patch = Body.parse(req.body);
+      const updated = await storage.updateScenarioEdits(id, patch);
+      if (!updated) return res.status(404).json({ error: "Scenario not found" });
+      res.json({ scenario: updated });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/scenarios/:id/hit-rate — compute hit-rate vs realized moves */
+  app.get("/api/scenarios/:id/hit-rate", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const sc = await storage.getScenario(id);
+      if (!sc) return res.status(404).json({ error: "Scenario not found" });
+      const { fetchSeries } = await import("./series/fetchSeries");
+      const { scoreHitRate } = await import("./analysis/scenarios");
+      const { cleanSeries } = await import("./analysis/stats");
+
+      const inputs: any = sc.inputsJson;
+      const driverIds: string[] = (inputs?.drivers ?? []).map((d: any) => d.id);
+      const equityIds: string[] = (inputs?.equities ?? []).map((e: any) => e.id);
+
+      const dir = (oldVal: number | null | undefined, newVal: number | null | undefined): "up" | "down" | "flat" => {
+        if (oldVal == null || newVal == null) return "flat";
+        if (newVal > oldVal) return "up";
+        if (newVal < oldVal) return "down";
+        return "flat";
+      };
+      const realizedDrivers: Record<string, { direction: "up" | "down" | "flat" }> = {};
+      const realizedEquities: Record<string, { direction: "up" | "down" | "flat" }> = {};
+      await Promise.all(driverIds.map(async (id) => {
+        const r = await fetchSeries(id);
+        const c = cleanSeries(r.data);
+        const old = inputs.drivers.find((d: any) => d.id === id)?.latestValue;
+        realizedDrivers[id] = { direction: dir(old, c[c.length - 1]?.value) };
+      }));
+      await Promise.all(equityIds.map(async (id) => {
+        const r = await fetchSeries(id);
+        const c = cleanSeries(r.data);
+        const old = inputs.equities.find((e: any) => e.id === id)?.latestLevel;
+        realizedEquities[id] = { direction: dir(old, c[c.length - 1]?.value) };
+      }));
+      const hitRate = scoreHitRate(
+        { baseCase: sc.baseCase, bullCase: sc.bullCase, bearCase: sc.bearCase },
+        { drivers: realizedDrivers, equities: realizedEquities },
+      );
+      // Persist for future reads
+      await storage.setScenarioHitRate(id, hitRate as any);
+      res.json({ scenario: sc, hitRate, realized: { drivers: realizedDrivers, equities: realizedEquities } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return httpServer;
 }

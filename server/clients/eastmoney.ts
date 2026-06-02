@@ -580,6 +580,7 @@ export async function getEastMoneyKline(
   secid: string,
   beg?: string,
   end?: string,
+  klt: 101 | 102 | 103 = 101,
 ): Promise<EastMoneyResponse<EastMoneyKline>> {
   const begParam = beg ?? "20240101";
   const endParam = end ?? "20991231";
@@ -588,7 +589,7 @@ export async function getEastMoneyKline(
     `https://push2his.eastmoney.com/api/qt/stock/kline/get` +
     `?secid=${encodeURIComponent(secid)}` +
     `&fields1=f1,f3&fields2=f51,f52,f53,f54,f55,f56` +
-    `&klt=101&fqt=1` +
+    `&klt=${klt}&fqt=1` +
     `&beg=${begParam}&end=${endParam}`;
 
   try {

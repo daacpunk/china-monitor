@@ -106,16 +106,24 @@ export interface EastMoneyConfig {
   clientFn:
     | "getStockConnectFlow"
     | "getMarginBalance"
-    | "getSectorPerformance";
+    | "getSectorPerformance"
+    | "getEastMoneyIndexKline";
   /**
    * Which field of the row to map into TimePoint.value.
    *   - getStockConnectFlow: "totalInflow" | "shanghaiInflow" | "shenzhenInflow"
    *   - getMarginBalance:    "rzrqye" | "rzye" | "rqye"
    *   - getSectorPerformance: not time-series (snapshot only) — leave undefined
+   *   - getEastMoneyIndexKline: "close" | "open" | "high" | "low" (default close)
    */
   valueField?: string;
   /** Optional value scale (e.g. CNY → CNY billions). */
   divideBy?: number;
+  /** For getEastMoneyIndexKline: EastMoney secid, e.g. "0.399006" for ChiNext. */
+  secid?: string;
+  /** For getEastMoneyIndexKline: 101=daily, 102=weekly, 103=monthly. Default 101. */
+  klt?: 101 | 102 | 103;
+  /** For getEastMoneyIndexKline: history start date YYYYMMDD. Default 5y ago. */
+  beg?: string;
 }
 
 export interface SeriesEntry {
@@ -583,6 +591,20 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     ceic: { seriesId: 455745417, searchKeyword: "Equity Market Index Shanghai Shenzhen 300", country: "CN" },
     yahoo: { ticker: "000300.SS", interval: "1mo", range: "5y" },
     notes: "CEIC: Equity Market Index: Shanghai Shenzhen 300 Month End (id=455745417).",
+  },
+  chinext_monthly: {
+    label: "ChiNext (month-end, EastMoney)",
+    unit: "index",
+    category: "equity",
+    fallback: "eastmoney",
+    eastmoney: {
+      clientFn: "getEastMoneyIndexKline",
+      secid: "0.399006",
+      klt: 103,
+      valueField: "close",
+      beg: "20210101",
+    },
+    notes: "EastMoney monthly kline for ChiNext (创业板指, secid=0.399006). Yahoo's 1mo endpoint returns only the current month for this ticker, so EastMoney push2his is used as primary.",
   },
 
   // ─── EastMoney direct (Phase 2.5) ─────────────────────────────────────────

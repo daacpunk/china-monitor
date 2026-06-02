@@ -15,6 +15,7 @@ import {
   getStockConnectFlow,
   getMarginBalance,
   getSectorPerformance,
+  getEastMoneyKline,
 } from "../clients/eastmoney";
 import { getStockConnectMonthlyAdt } from "../clients/hkex";
 import { getOecdSeries } from "../clients/oecd";
@@ -250,6 +251,20 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
         payload = await getMarginBalance();
       } else if (cfg.clientFn === "getSectorPerformance") {
         payload = await getSectorPerformance();
+      } else if (cfg.clientFn === "getEastMoneyIndexKline") {
+        if (!cfg.secid) {
+          throw new Error("getEastMoneyIndexKline requires secid in EastMoneyConfig");
+        }
+        const klt = cfg.klt ?? 101;
+        // Default beg = 5 years ago (in YYYYMMDD) if not set
+        const defaultBeg = (() => {
+          const d = new Date();
+          d.setUTCFullYear(d.getUTCFullYear() - 5);
+          return d.toISOString().slice(0, 10).replace(/-/g, "");
+        })();
+        const beg = cfg.beg ?? defaultBeg;
+        payload = await getEastMoneyKline(cfg.secid, beg, undefined, klt);
+        // For monthly kline, normalize date to month-end (EastMoney returns last trading day of month already).
       } else {
         throw new Error(`Unknown EastMoney clientFn: ${cfg.clientFn}`);
       }

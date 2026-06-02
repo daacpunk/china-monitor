@@ -8,6 +8,7 @@ import {
   chartConfigs,
   viewState,
   importedSeries,
+  scenarios,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -27,6 +28,8 @@ import type {
   InsertViewState,
   ImportedSeries,
   InsertImportedSeries,
+  Scenario,
+  InsertScenario,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -155,6 +158,24 @@ export async function bootstrapSchema(): Promise<void> {
       PRIMARY KEY (series_id, date)
     )`,
     `CREATE INDEX IF NOT EXISTS imported_series_id_idx ON imported_series(series_id)`,
+    `CREATE TABLE IF NOT EXISTS scenarios (
+      id SERIAL PRIMARY KEY,
+      generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      target_quarter TEXT NOT NULL,
+      base_case JSONB NOT NULL,
+      bull_case JSONB NOT NULL,
+      bear_case JSONB NOT NULL,
+      base_prob DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+      bull_prob DOUBLE PRECISION NOT NULL DEFAULT 0.25,
+      bear_prob DOUBLE PRECISION NOT NULL DEFAULT 0.25,
+      inputs_json JSONB NOT NULL,
+      model TEXT NOT NULL,
+      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+      user_edited BOOLEAN NOT NULL DEFAULT FALSE,
+      hit_rate_json JSONB
+    )`,
+    `CREATE INDEX IF NOT EXISTS scenarios_quarter_idx ON scenarios(target_quarter)`,
+    `CREATE INDEX IF NOT EXISTS scenarios_generated_idx ON scenarios(generated_at)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -241,6 +262,14 @@ export interface IStorage {
   >;
   getImportedSeries(seriesId: string): Promise<ImportedSeries[]>;
   deleteImportedSeries(seriesId: string): Promise<number>;
+
+  // Scenarios (Phase 3b)
+  createScenario(input: InsertScenario): Promise<Scenario>;
+  listScenarios(limit?: number): Promise<Scenario[]>;
+  getScenario(id: number): Promise<Scenario | undefined>;
+  getLatestScenarioForQuarter(targetQuarter: string): Promise<Scenario | undefined>;
+  updateScenarioEdits(id: number, patch: { baseCase?: unknown; bullCase?: unknown; bearCase?: unknown; baseProb?: number; bullProb?: number; bearProb?: number }): Promise<Scenario | undefined>;
+  setScenarioHitRate(id: number, hitRate: unknown): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -585,6 +614,69 @@ export class DatabaseStorage implements IStorage {
       .where(eq(importedSeries.seriesId, seriesId))
       .orderBy(desc(importedSeries.date));
     return rows;
+  }
+
+  // ─── Scenarios (Phase 3b) ────────────────────────────────────────────
+  async createScenario(input: InsertScenario): Promise<Scenario> {
+    const row = await (db as any)
+      .insert(scenarios)
+      .values(input)
+      .returning();
+    return row[0];
+  }
+
+  async listScenarios(limit = 20): Promise<Scenario[]> {
+    const rows = await (db as any)
+      .select()
+      .from(scenarios)
+      .orderBy(desc(scenarios.generatedAt))
+      .limit(limit);
+    return rows;
+  }
+
+  async getScenario(id: number): Promise<Scenario | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(scenarios)
+      .where(eq(scenarios.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getLatestScenarioForQuarter(targetQuarter: string): Promise<Scenario | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(scenarios)
+      .where(eq(scenarios.targetQuarter, targetQuarter))
+      .orderBy(desc(scenarios.generatedAt))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updateScenarioEdits(
+    id: number,
+    patch: { baseCase?: unknown; bullCase?: unknown; bearCase?: unknown; baseProb?: number; bullProb?: number; bearProb?: number },
+  ): Promise<Scenario | undefined> {
+    const setObj: Record<string, unknown> = { userEdited: true };
+    if (patch.baseCase != null) setObj.baseCase = patch.baseCase;
+    if (patch.bullCase != null) setObj.bullCase = patch.bullCase;
+    if (patch.bearCase != null) setObj.bearCase = patch.bearCase;
+    if (patch.baseProb != null) setObj.baseProb = patch.baseProb;
+    if (patch.bullProb != null) setObj.bullProb = patch.bullProb;
+    if (patch.bearProb != null) setObj.bearProb = patch.bearProb;
+    const rows = await (db as any)
+      .update(scenarios)
+      .set(setObj)
+      .where(eq(scenarios.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async setScenarioHitRate(id: number, hitRate: unknown): Promise<void> {
+    await (db as any)
+      .update(scenarios)
+      .set({ hitRateJson: hitRate })
+      .where(eq(scenarios.id, id));
   }
 
   async deleteImportedSeries(seriesId: string): Promise<number> {
