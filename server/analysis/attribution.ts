@@ -228,6 +228,28 @@ function direction(values: number[], k = 2): 1 | -1 | 0 {
   return 0;
 }
 
+/** Collapse a date string (YYYY-MM-DD or longer) to its month key (YYYY-MM).
+ *  Used to align monthly series that arrive with different day-of-month
+ *  conventions (e.g. macro releases dated month-start vs. equity month-end). */
+function toMonthKey(d: string): string {
+  return d.slice(0, 7);
+}
+
+/** Re-key a series to month-end (or whichever observation per month is
+ *  available) so two monthly series with different day-of-month conventions
+ *  can be aligned on YYYY-MM. If multiple obs share a month, the last one wins. */
+function normalizeToMonthly(points: TimePoint[]): TimePoint[] {
+  const m = new Map<string, TimePoint>();
+  for (const p of points) {
+    if (!p?.date || typeof p.value !== "number" || !Number.isFinite(p.value)) continue;
+    const key = toMonthKey(p.date);
+    // Keep the last observation in each month (sort by full date afterwards).
+    const existing = m.get(key);
+    if (!existing || p.date > existing.date) m.set(key, { date: key + "-01", value: p.value });
+  }
+  return Array.from(m.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /** Compute attribution for one driver→equity pair given fetched series.
  *  Returns null if either side has fewer than 6 aligned observations — betas
  *  on tiny samples are noise. */
@@ -237,9 +259,13 @@ export function computePair(
   driverKind: "level" | "delta",
   equitySeries: TimePoint[],
 ): PairAttribution | null {
+  // Normalize both sides to YYYY-MM-01 keys so equity (month-end trading day)
+  // aligns with macro (month-start release date).
+  const driverNorm = normalizeToMonthly(driverSeries);
+  const equityNorm = normalizeToMonthly(equitySeries);
   const aligned = alignSeries([
-    { id: "driver", points: driverSeries },
-    { id: "equity", points: equitySeries },
+    { id: "driver", points: driverNorm },
+    { id: "equity", points: equityNorm },
   ]);
 
   if (aligned.dates.length < 6) return null;
