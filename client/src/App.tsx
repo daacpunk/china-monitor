@@ -12,6 +12,7 @@ import Investment from "@/pages/Investment";
 import Gdp from "@/pages/Gdp";
 import Fiscal from "@/pages/Fiscal";
 import Equity from "@/pages/Equity";
+import EquityDeepDive from "@/pages/EquityDeepDive";
 import KShape from "@/pages/KShape";
 import Margins from "@/pages/Margins";
 import Property from "@/pages/Property";
@@ -29,6 +30,7 @@ function AppRouter() {
         <Route path="/gdp" component={Gdp} />
         <Route path="/fiscal" component={Fiscal} />
         <Route path="/equity" component={Equity} />
+        <Route path="/equity-deepdive" component={EquityDeepDive} />
         <Route path="/kshape" component={KShape} />
         <Route path="/margins" component={Margins} />
         <Route path="/property" component={Property} />

@@ -8,6 +8,9 @@ import { DATA } from "@/data/staticData";
 import { baseChartOptions, CHART_COLORS } from "@/lib/charts";
 import { useSeries, useCalendar } from "@/hooks/useSeries";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SparklineCard } from "@/components/SparklineCard";
+import { AICommentaryPanel } from "@/components/AICommentaryPanel";
+import { CompareButton } from "@/components/CompareModal";
 
 export default function Outlook() {
   // PMI data
@@ -141,6 +144,50 @@ export default function Outlook() {
           )}
         </div>
       </Card>
+
+      {/* OECD leading & sentiment indicators */}
+      <Card className="p-5 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold">OECD leading & sentiment — China</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              100 = long-run average. CLI leads activity by ~6–9 months; BCI and CCI track sentiment.
+            </p>
+          </div>
+          <CompareButton
+            ids={["oecd_cli_china", "oecd_bci_china", "oecd_cci_china"]}
+            label="Compare"
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <SparklineCard
+            logicalId="oecd_cli_china"
+            label="OECD CLI"
+            pivot={100}
+            hint="Composite leading indicator — ~6–9m lead on activity"
+          />
+          <SparklineCard
+            logicalId="oecd_bci_china"
+            label="OECD BCI"
+            pivot={100}
+            hint="Business confidence — capex & hiring intent"
+          />
+          <SparklineCard
+            logicalId="oecd_cci_china"
+            label="OECD CCI"
+            pivot={100}
+            hint="Consumer confidence — spending & savings"
+          />
+        </div>
+      </Card>
+
+      {/* AI commentary on the OECD CLI — most-watched outlook indicator */}
+      <div className="mb-4">
+        <AICommentaryPanel
+          logicalId="oecd_cli_china"
+          contextIds={["oecd_bci_china", "oecd_cci_china", "pmi_mfg"]}
+        />
+      </div>
 
       {/* Release calendar table */}
       <Card className="p-5 mb-4">

@@ -8,6 +8,8 @@ import { DATA } from "@/data/staticData";
 import { baseChartOptions, CHART_COLORS } from "@/lib/charts";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useSeries } from "@/hooks/useSeries";
+import { AICommentaryPanel } from "@/components/AICommentaryPanel";
+import { CompareButton } from "@/components/CompareModal";
 
 const INDEX_IDS = [
   { id: "csi300_close",  label: "CSI 300",        color: CHART_COLORS.primary   },
@@ -110,6 +112,20 @@ export default function Equity() {
           )}
         </div>
       </Card>
+
+      <div className="mb-4 flex items-center justify-end gap-2">
+        <CompareButton
+          ids={["csi300_monthly", "hangseng_monthly", "ppi_yoy", "m2_yoy"]}
+          label="Compare CSI/HSI vs macro"
+        />
+      </div>
+
+      <div className="mb-4">
+        <AICommentaryPanel
+          logicalId="csi300_monthly"
+          contextIds={["hangseng_monthly", "ppi_yoy", "cpi_yoy", "m2_yoy", "policy_rate_7d"]}
+        />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-5">

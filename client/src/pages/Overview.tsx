@@ -7,6 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
 import { DATA } from "@/data/staticData";
 import { useSeries, getLatestValue } from "@/hooks/useSeries";
+import { useAnomalies, type AnomalyRow } from "@/hooks/useAnalysis";
+import { AnomalyBadge } from "@/components/AnomalyBadge";
+import { CompareButton } from "@/components/CompareModal";
 
 function LiveStatCard({
   label,
@@ -16,6 +19,7 @@ function LiveStatCard({
   tone,
   suffix = "%",
   invertTone = false,
+  anomalyRow,
 }: {
   label: string;
   logicalId: string;
@@ -24,6 +28,7 @@ function LiveStatCard({
   tone?: "good" | "bad" | "neutral";
   suffix?: string;
   invertTone?: boolean;
+  anomalyRow?: AnomalyRow;
 }) {
   const { data, provenance, isLoading, isError } = useSeries(logicalId) as any;
 
@@ -59,9 +64,38 @@ function LiveStatCard({
       delta={deltaText}
       hint={hint}
       tone={hasData ? computedTone : "neutral"}
-    />
+    >
+      {anomalyRow?.anomaly && (
+        <div className="mt-2">
+          <AnomalyBadge
+            anomaly={anomalyRow.anomaly}
+            momPct={anomalyRow.momLagPct}
+            yoyPct={anomalyRow.yoyLagPct}
+          />
+        </div>
+      )}
+    </StatCard>
   );
 }
+
+// CEIC series IDs to monitor for anomalies on Overview
+const OVERVIEW_ANOMALY_IDS = [
+  "gdp_yoy",
+  "cpi_yoy",
+  "ppi_yoy",
+  "iva_yoy",
+  "exports_yoy",
+  "imports_yoy",
+  "new_home_prices_70city",
+  "usdcny_monthly",
+  "m2_yoy",
+  "unemployment_rate",
+  "hangseng_monthly",
+  "csi300_monthly",
+  "fai_total_ytd",
+  "fai_real_estate_ytd",
+  "fai_hitech_ytd",
+];
 
 export default function Overview() {
   const faiFull = useSeries("fai_total_ytd") as any;
@@ -70,6 +104,25 @@ export default function Overview() {
   const faiHT = useSeries("fai_hitech_ytd") as any;
 
   const prov = ppi.data?.provenance;
+
+  // Bulk-fetch anomalies for all overview KPIs in one call
+  const anomalies = useAnomalies(OVERVIEW_ANOMALY_IDS);
+  const anomalyById: Record<string, AnomalyRow> = {};
+  (anomalies.data?.results ?? []).forEach((r) => {
+    anomalyById[r.id] = r;
+  });
+
+  // Surface most-severe anomalies for the banner
+  const severityRank = { anomaly: 3, watch: 2, normal: 1, undefined: 0 } as Record<string, number>;
+  const topAnomalies = (anomalies.data?.results ?? [])
+    .filter((r) => r.anomaly && r.anomaly.severity !== "normal")
+    .sort(
+      (a, b) =>
+        (severityRank[b.anomaly?.severity ?? "normal"] ?? 0) -
+          (severityRank[a.anomaly?.severity ?? "normal"] ?? 0) ||
+        Math.abs(b.anomaly!.zScore) - Math.abs(a.anomaly!.zScore),
+    )
+    .slice(0, 6);
 
   return (
     <div data-testid="page-overview">
@@ -98,26 +151,68 @@ export default function Overview() {
           logicalId="fai_total_ytd"
           tone="good"
           hint="Year-to-date FAI growth"
+          anomalyRow={anomalyById["fai_total_ytd"]}
         />
         <LiveStatCard
           label="PPI YoY"
           logicalId="ppi_yoy"
           tone="good"
           hint="Producer price index"
+          anomalyRow={anomalyById["ppi_yoy"]}
         />
         <LiveStatCard
           label="Property FAI YTD"
           logicalId="fai_real_estate_ytd"
           invertTone={true}
           hint="Real estate investment"
+          anomalyRow={anomalyById["fai_real_estate_ytd"]}
         />
         <LiveStatCard
           label="High-tech FAI YTD"
           logicalId="fai_hitech_ytd"
           tone="good"
           hint="High-tech manufacturing capex"
+          anomalyRow={anomalyById["fai_hitech_ytd"]}
         />
       </div>
+
+      {topAnomalies.length > 0 && (
+        <Card className="p-4 mb-6 border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              Regime watch
+              <Badge variant="outline" className="font-normal text-[10px]">
+                z-score &gt; 2 across {OVERVIEW_ANOMALY_IDS.length} series
+              </Badge>
+            </h2>
+            <CompareButton
+              ids={topAnomalies.slice(0, 4).map((r) => r.id)}
+              label="Compare top movers"
+            />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {topAnomalies.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded-md border bg-card px-3 py-2"
+                data-testid={`anomaly-row-${r.id}`}
+              >
+                <div className="min-w-0">
+                  <div className="text-xs font-medium truncate">{r.id}</div>
+                  <div className="text-[10px] text-muted-foreground tabular-nums">
+                    {r.anomaly!.value.toFixed(2)} · vs μ{r.anomaly!.windowMean.toFixed(2)}
+                  </div>
+                </div>
+                <AnomalyBadge
+                  anomaly={r.anomaly}
+                  momPct={r.momLagPct}
+                  yoyPct={r.yoyLagPct}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card className="p-5">

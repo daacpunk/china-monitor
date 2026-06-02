@@ -26,6 +26,7 @@ const SECTIONS: Array<{ slug: string; label: string; icon: any; group: string }>
   { slug: "/gdp", label: "GDP & Energy", icon: Activity, group: "Dashboard" },
   { slug: "/fiscal", label: "Fiscal / Policy", icon: Landmark, group: "Dashboard" },
   { slug: "/equity", label: "Equities", icon: LineChart, group: "Dashboard" },
+  { slug: "/equity-deepdive", label: "Equity Deep-Dive", icon: LineChart, group: "Dashboard" },
   { slug: "/kshape", label: "K-shape Monitor", icon: TrendingUp, group: "Dashboard" },
   { slug: "/margins", label: "PPI & Margins", icon: Factory, group: "Dashboard" },
   { slug: "/property", label: "Property", icon: Building2, group: "Dashboard" },
