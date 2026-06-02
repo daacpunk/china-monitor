@@ -19,3 +19,9 @@ data.pgdata/
 # Local CEIC probe dumps (large, regenerable)
 ceic_subscribed_*.json
 .DS_Store
+
+# AKShare sidecar local virtualenv
+akshare-sidecar/.venv/
+akshare-sidecar/__pycache__/
+akshare-sidecar/*.pyc
+/tmp/akshare.log

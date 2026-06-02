@@ -487,6 +487,89 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── AKShare (Phase 2.5 — Python sidecar) ──────────────────────────────
+  // All AKShare calls proxy through the akshare-sidecar service over the
+  // Railway internal network. Cache TTL on the sidecar side is 24h, so we
+  // mirror that here for browser caching on most endpoints.
+  const akCache = "public, max-age=86400"; // 24h
+
+  /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
+  app.get("/api/akshare/health", async (_req, res) => {
+    try {
+      const { getAkshareHealth } = await import("./clients/akshare");
+      const result = await getAkshareHealth();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /** GET /api/akshare/ashare?symbol=600519&start=2020-01-01&adjust=qfq */
+  app.get("/api/akshare/ashare", async (req, res) => {
+    try {
+      const Q = z.object({
+        symbol: z.string().regex(/^\d{6}$/),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        adjust: z.enum(["", "qfq", "hfq"]).optional(),
+      });
+      const q = Q.parse(req.query);
+      const { getAshareHistorical } = await import("./clients/akshare");
+      const result = await getAshareHistorical(q);
+      res.setHeader("Cache-Control", akCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ source: "akshare", data: [], error: err.message });
+    }
+  });
+
+  /** GET /api/akshare/hk?symbol=00700&start=2020-01-01&adjust=qfq */
+  app.get("/api/akshare/hk", async (req, res) => {
+    try {
+      const Q = z.object({
+        symbol: z.string().regex(/^\d{5}$/),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        adjust: z.enum(["", "qfq", "hfq"]).optional(),
+      });
+      const q = Q.parse(req.query);
+      const { getHkHistorical } = await import("./clients/akshare");
+      const result = await getHkHistorical(q);
+      res.setHeader("Cache-Control", akCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ source: "akshare", data: [], error: err.message });
+    }
+  });
+
+  /** GET /api/akshare/sectors?indicator=今日 */
+  app.get("/api/akshare/sectors", async (req, res) => {
+    try {
+      const Q = z.object({ indicator: z.enum(["今日", "5日", "10日"]).optional() });
+      const q = Q.parse(req.query);
+      const { getAkshareSectorFlows } = await import("./clients/akshare");
+      const result = await getAkshareSectorFlows(q.indicator);
+      res.setHeader("Cache-Control", "public, max-age=3600"); // 1h, intraday
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ source: "akshare", data: [], error: err.message });
+    }
+  });
+
+  /** GET /api/akshare/income?symbol=600519 — annual income statement */
+  app.get("/api/akshare/income", async (req, res) => {
+    try {
+      const Q = z.object({ symbol: z.string().regex(/^\d{6}$/) });
+      const q = Q.parse(req.query);
+      const { getAkshareIncome } = await import("./clients/akshare");
+      const result = await getAkshareIncome(q.symbol);
+      res.setHeader("Cache-Control", akCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ source: "akshare", data: [], error: err.message });
+    }
+  });
+
   // ─── Imports / FactSet (Phase 2.5) ─────────────────────────────────────
   // The user has FactSet workstation but no API access, so we accept pasted
   // or uploaded CSV text and store the points in the `imported_series` table.
