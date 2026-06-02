@@ -1,10 +1,17 @@
 import "dotenv/config";
+import dns from "node:dns";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 import { bootstrapSchema } from "./storage";
+
+// Railway private networking (*.railway.internal) is IPv6-only. Node 18+
+// undici resolves DNS via its default order which can prefer or filter
+// to IPv4, producing ENOTFOUND/fetch-failed against railway.internal hosts.
+// Prefer IPv6 so internal calls (e.g. AKShare sidecar) succeed.
+dns.setDefaultResultOrder("ipv6first");
 
 const app = express();
 const httpServer = createServer(app);
