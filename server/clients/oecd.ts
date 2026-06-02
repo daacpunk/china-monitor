@@ -83,9 +83,16 @@ export async function getOecdSeries(
   const timer = setTimeout(() => controller.abort(), 25_000);
 
   try {
+    // OECD SDMX is sensitive: sending Accept: text/csv WITHOUT Accept-Language
+    // triggers HTTP 500 + body "languageTag1" (Cloudflare/OECD localisation guard).
+    // Always send Accept-Language to avoid the trap.
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: "text/csv" },
+      headers: {
+        Accept: "text/csv",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "china-monitor/1.0 (+https://github.com/daacpunk/china-monitor)",
+      },
     });
     if (!res.ok) {
       return {
