@@ -356,4 +356,6 @@ if __name__ == "__main__":
     import uvicorn
     log.info("Starting akshare-sidecar on port %d (auth=%s, cache_ttl=%ds)",
              PORT, "yes" if AKSHARE_TOKEN else "NO", CACHE_TTL_SECONDS)
-    uvicorn.run("main:app", host="0.0.0.0", port=PORT, log_level="info")
+    # Bind to :: (dual-stack IPv4+IPv6). Railway private networking is
+    # IPv6-only between services, so binding 0.0.0.0 alone breaks intra-project calls.
+    uvicorn.run("main:app", host="::", port=PORT, log_level="info")
