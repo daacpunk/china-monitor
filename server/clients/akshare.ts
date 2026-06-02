@@ -109,6 +109,27 @@ export async function getHkHistorical(opts: {
   }
 }
 
+/** China index daily/weekly/monthly OHLCV via AKShare /index/historical.
+ * Symbol formats:  "sz399006" (ChiNext), "sh000300" (CSI 300), "sh000001" (Shanghai Composite).
+ * period: "daily" | "weekly" | "monthly" — monthly is resampled month-end. */
+export async function getAkshareIndexHistorical(opts: {
+  symbol: string;
+  start?: string;  // YYYY-MM-DD
+  end?: string;
+  period?: "daily" | "weekly" | "monthly";
+}): Promise<AkshareResponse<AkshareOhlcvPoint>> {
+  try {
+    const qs = new URLSearchParams({ symbol: opts.symbol });
+    if (opts.start) qs.set("start", opts.start);
+    if (opts.end) qs.set("end", opts.end);
+    if (opts.period) qs.set("period", opts.period);
+    const r = await getJson<{ data: AkshareOhlcvPoint[] }>(`/index/historical?${qs}`);
+    return { source: "akshare", data: r.data ?? [], fetchedAt: FETCHED_AT() };
+  } catch (err: any) {
+    return { source: "akshare", data: [], fetchedAt: FETCHED_AT(), error: err.message };
+  }
+}
+
 /** Industry sector money-flow snapshot. */
 export async function getAkshareSectorFlows(
   indicator: "今日" | "5日" | "10日" = "今日",

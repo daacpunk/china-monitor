@@ -236,6 +236,82 @@ def hk_historical(
     }
 
 
+@app.get("/index/historical")
+def index_historical(
+    symbol: str = Query(..., description="AKShare index symbol, e.g. 'sz399006' (ChiNext), 'sh000300' (CSI 300), 'sh000001' (Shanghai Composite)"),
+    start: Optional[str] = Query(None, description="YYYY-MM-DD; default = 5y ago"),
+    end: Optional[str] = Query(None, description="YYYY-MM-DD; default = today"),
+    period: str = Query("daily", description="'daily', 'weekly', or 'monthly'"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """China index OHLCV history via ak.stock_zh_index_daily_em (EastMoney source).
+
+    Used as the primary source for indices that lack monthly history on Yahoo
+    Finance (e.g. ChiNext sz399006). AKShare runs from inside Railway's China
+    egress path on this sidecar, which bypasses the regional WAF blocking the
+    EastMoney push2his endpoint from the main Node service's US egress.
+    """
+    require_auth(x_akshare_token)
+
+    if period not in ("daily", "weekly", "monthly"):
+        raise HTTPException(status_code=400, detail="period must be 'daily', 'weekly', or 'monthly'")
+
+    s = normalise_start(start)
+    e = normalise_end(end)
+    key = ("index_hist", symbol, s, e, period)
+
+    def fetch():
+        t0 = time.time()
+        # stock_zh_index_daily_em returns daily OHLCV in DataFrame form with
+        # columns: date, open, close, high, low, volume, amount.
+        df = ak.stock_zh_index_daily_em(symbol=symbol, start_date=s, end_date=e)
+        log.info("stock_zh_index_daily_em %s rows=%d in %.2fs",
+                 symbol, 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return []
+        # Normalise: AKShare's _em variant returns lowercase English columns already.
+        df = df.copy()
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        # Resample to monthly/weekly if requested. Index by date for resample.
+        if period in ("weekly", "monthly"):
+            df["_dt"] = pd.to_datetime(df["date"])
+            df = df.set_index("_dt")
+            rule = "W-FRI" if period == "weekly" else "ME"  # month-end
+            agg = {
+                c: ("last" if c == "close"
+                    else "first" if c == "open"
+                    else "max" if c == "high"
+                    else "min" if c == "low"
+                    else "sum" if c in ("volume", "amount")
+                    else "last")
+                for c in df.columns if c != "date"
+            }
+            df = df.resample(rule).agg(agg).dropna(subset=["close"])
+            df["date"] = df.index.strftime("%Y-%m-%d")
+            df = df.reset_index(drop=True)
+        out_cols = [c for c in ["date", "open", "high", "low", "close", "volume", "amount"] if c in df.columns]
+        return df[out_cols].to_dict(orient="records")
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("index_historical failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    return {
+        "source": "akshare",
+        "endpoint": "stock_zh_index_daily_em",
+        "symbol": symbol,
+        "period": period,
+        "start": s,
+        "end": e,
+        "count": len(rows),
+        "data": rows,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.get("/sector/flows")
 def sector_flows(
     indicator: str = Query("今日", description="Time window: '今日', '5日', '10日'"),

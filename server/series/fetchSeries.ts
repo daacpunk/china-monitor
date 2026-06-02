@@ -17,6 +17,11 @@ import {
   getSectorPerformance,
   getEastMoneyKline,
 } from "../clients/eastmoney";
+import {
+  getAkshareIndexHistorical,
+  getAshareHistorical,
+  getHkHistorical,
+} from "../clients/akshare";
 import { getStockConnectMonthlyAdt } from "../clients/hkex";
 import { getOecdSeries } from "../clients/oecd";
 
@@ -33,6 +38,7 @@ export interface Provenance {
     | "oecd"
     | "hkex"
     | "eastmoney"
+    | "akshare"
     | "stooq"
     | "yahoo"
     | "pending"
@@ -237,6 +243,60 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
       }
     } catch (err: any) {
       console.warn(`[fetchSeries] OECD failed for ${logicalId}:`, err.message);
+    }
+  }
+
+  // ─── Try AKShare sidecar (Phase 3b ChiNext bypass) ──────────────────────
+  // Runs through the Railway Python sidecar (China-egress path), used as primary
+  // for series whose direct EastMoney endpoint is blocked from main service IP.
+  if (entry.akshare) {
+    try {
+      const cfg = entry.akshare;
+      const valueField = cfg.valueField ?? "close";
+      let payload: { source: "akshare"; data: any[]; fetchedAt: string; error?: string };
+      if (cfg.endpoint === "index/historical") {
+        payload = await getAkshareIndexHistorical({
+          symbol: cfg.symbol,
+          start: cfg.start,
+          period: cfg.period ?? "daily",
+        });
+      } else if (cfg.endpoint === "ashare/historical") {
+        payload = await getAshareHistorical({
+          symbol: cfg.symbol,
+          start: cfg.start,
+          adjust: cfg.adjust ?? "qfq",
+        });
+      } else if (cfg.endpoint === "hk/historical") {
+        payload = await getHkHistorical({
+          symbol: cfg.symbol,
+          start: cfg.start,
+          adjust: cfg.adjust ?? "qfq",
+        });
+      } else {
+        throw new Error(`Unknown AKShare endpoint: ${(cfg as any).endpoint}`);
+      }
+
+      if (!payload.error && payload.data.length > 0) {
+        const points: TimePoint[] = payload.data
+          .filter((r: any) => r.date && typeof r[valueField] === "number")
+          .map((r: any) => ({ date: r.date, value: r[valueField] as number }));
+        if (points.length > 0) {
+          return {
+            data: points,
+            provenance: {
+              source: "akshare",
+              lastUpdated: now,
+              subscribed: false,
+              cacheHit: false,
+            },
+          };
+        }
+      }
+      if (payload.error) {
+        console.warn(`[fetchSeries] AKShare ${cfg.endpoint} for ${logicalId}: ${payload.error}`);
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] AKShare failed for ${logicalId}:`, err.message);
     }
   }
 

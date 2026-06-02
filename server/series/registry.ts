@@ -13,7 +13,7 @@
  * direct seriesId mapping (`ceic.seriesId`). Falls back to FRED/Yahoo if CEIC fails.
  */
 
-export type DataSourceName = "ceic" | "nbs" | "fred" | "oecd" | "hkex" | "eastmoney" | "yahoo" | "stooq" | "pending";
+export type DataSourceName = "ceic" | "nbs" | "fred" | "oecd" | "hkex" | "eastmoney" | "akshare" | "yahoo" | "stooq" | "pending";
 export type SeriesCategory =
   | "fai"
   | "margins"
@@ -137,9 +137,33 @@ export interface SeriesEntry {
   oecd?: OecdConfig;
   hkex?: HkexConfig;
   eastmoney?: EastMoneyConfig;
+  akshare?: AkshareConfig;
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
+}
+
+/**
+ * AKShare sidecar config — routes through the Railway Python sidecar service.
+ * Used as a primary source for indices and flows that hit the EastMoney push2his
+ * endpoint, which is intermittently blocked from the main service's egress IP.
+ */
+export interface AkshareConfig {
+  /** Which sidecar endpoint to call. */
+  endpoint: "index/historical" | "ashare/historical" | "hk/historical";
+  /** Symbol — format depends on endpoint:
+   *   - index/historical: "sz399006" (ChiNext), "sh000300" (CSI 300), "sh000001" (Shanghai Comp)
+   *   - ashare/historical: 6-digit A-share code, e.g. "600519"
+   *   - hk/historical:     5-digit HK code, e.g. "00700" */
+  symbol: string;
+  /** For index/historical: daily | weekly | monthly. Default "daily". */
+  period?: "daily" | "weekly" | "monthly";
+  /** For ashare/hk historical: forward/back adjustment. Default "qfq". */
+  adjust?: "" | "qfq" | "hfq";
+  /** ISO start date YYYY-MM-DD. Default = 5y ago. */
+  start?: string;
+  /** Which field of the row to map into TimePoint.value. Default "close". */
+  valueField?: "open" | "close" | "high" | "low" | "volume" | "amount";
 }
 
 export const REGISTRY: Record<string, SeriesEntry> = {
@@ -593,10 +617,17 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     notes: "CEIC: Equity Market Index: Shanghai Shenzhen 300 Month End (id=455745417).",
   },
   chinext_monthly: {
-    label: "ChiNext (month-end, EastMoney)",
+    label: "ChiNext (month-end)",
     unit: "index",
     category: "equity",
-    fallback: "eastmoney",
+    fallback: "akshare",
+    akshare: {
+      endpoint: "index/historical",
+      symbol: "sz399006",
+      period: "monthly",
+      start: "2021-01-01",
+      valueField: "close",
+    },
     eastmoney: {
       clientFn: "getEastMoneyIndexKline",
       secid: "0.399006",
@@ -604,7 +635,7 @@ export const REGISTRY: Record<string, SeriesEntry> = {
       valueField: "close",
       beg: "20210101",
     },
-    notes: "EastMoney monthly kline for ChiNext (创业板指, secid=0.399006). Yahoo's 1mo endpoint returns only the current month for this ticker, so EastMoney push2his is used as primary.",
+    notes: "AKShare sidecar (stock_zh_index_daily_em) used as primary because the EastMoney push2his endpoint is intermittently blocked from the main service's egress IP. The sidecar runs through Railway's China-egress path. EastMoney direct kept as fallback.",
   },
 
   // ─── EastMoney direct (Phase 2.5) ─────────────────────────────────────────

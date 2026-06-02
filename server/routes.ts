@@ -542,6 +542,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/akshare/index?symbol=sz399006&start=2021-01-01&period=monthly */
+  app.get("/api/akshare/index", async (req, res) => {
+    try {
+      const Q = z.object({
+        symbol: z.string().min(3).max(16),
+        start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        period: z.enum(["daily", "weekly", "monthly"]).optional(),
+      });
+      const q = Q.parse(req.query);
+      const { getAkshareIndexHistorical } = await import("./clients/akshare");
+      const result = await getAkshareIndexHistorical(q);
+      res.setHeader("Cache-Control", akCache);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ source: "akshare", data: [], error: err.message });
+    }
+  });
+
   /** GET /api/akshare/sectors?indicator=今日 */
   app.get("/api/akshare/sectors", async (req, res) => {
     try {
