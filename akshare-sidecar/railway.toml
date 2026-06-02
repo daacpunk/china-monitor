@@ -7,7 +7,10 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 30
+# No healthcheck — Railway's healthcheck probes the PUBLIC domain, and we
+# only expose this service over the internal/private network. A healthcheck
+# here would mark every deploy as failed.
+# /health is still available internally; the main service uses it via
+# /api/akshare/health to monitor the sidecar.
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
