@@ -1,8 +1,9 @@
 /**
  * Trends — multi-timescale slope analysis page.
  *
- * Session 1 scope: header + picker + summary cards + classification table.
- * Session 2 will add the per-series detail view (regime markers, AI commentary).
+ * Session 1: header + picker + summary cards + classification table.
+ * Session 2: per-series detail view (chart with regime markers + regression
+ * overlays, interpretation panel, AI commentary).
  */
 
 import { useMemo, useState } from "react";
@@ -46,6 +47,7 @@ import {
   Zap,
   Loader2,
 } from "lucide-react";
+import { TrendDetail } from "@/components/TrendDetail";
 
 // ─── Types matching server/analysis/trends.ts ────────────────────────────────
 
@@ -632,7 +634,7 @@ function TrendTable({
 export default function Trends() {
   const [selectedIds, setSelectedIds] = useState<string[]>(DEFAULT_IDS);
   const [filter, setFilter] = useState<Classification | "all">("all");
-  const [_detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const { data: registryData } = useSeriesRegistry();
   const registry: RegistryEntry[] = registryData ?? [];
@@ -661,6 +663,19 @@ export default function Trends() {
   });
 
   const results = data?.results ?? [];
+  const detailResult = useMemo(
+    () => (detailId ? results.find((r) => r.id === detailId) ?? null : null),
+    [results, detailId],
+  );
+
+  // Context series for AI commentary: select up to 3 other selected series
+  // that are most likely macro drivers (registry category != 'equity').
+  const contextIds = useMemo(() => {
+    if (!detailId) return [] as string[];
+    return selectedIds
+      .filter((id) => id !== detailId)
+      .slice(0, 3);
+  }, [detailId, selectedIds]);
 
   return (
     <div data-testid="page-trends">
@@ -681,6 +696,15 @@ export default function Trends() {
         }
       />
 
+      {detailResult ? (
+        <TrendDetail
+          result={detailResult}
+          registry={byId.get(detailResult.id)}
+          onBack={() => setDetailId(null)}
+          contextIds={contextIds}
+        />
+      ) : (
+        <>
       <SeriesPicker
         selected={selectedIds}
         onChange={setSelectedIds}
@@ -729,8 +753,10 @@ export default function Trends() {
             activeFilter={filter}
           />
           <p className="mt-3 text-[11px] text-muted-foreground">
-            Click any row to open the per-series detail view (coming in session 2).
+            Click any row to open the per-series detail view.
           </p>
+        </>
+      )}
         </>
       )}
     </div>
