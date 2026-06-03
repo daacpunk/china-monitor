@@ -15,12 +15,17 @@ import {
   Moon,
   Sun,
   Monitor,
+  GitCompare,
+  Sparkles,
+  DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 
-const SECTIONS: Array<{ slug: string; label: string; icon: any; group: string }> = [
+type NavItem = { slug: string; label: string; icon: any; group: string };
+
+const SECTIONS: NavItem[] = [
   { slug: "/", label: "Overview", icon: LayoutDashboard, group: "Dashboard" },
   { slug: "/investment", label: "Investment / FAI", icon: TrendingUp, group: "Dashboard" },
   { slug: "/gdp", label: "GDP & Energy", icon: Activity, group: "Dashboard" },
@@ -31,7 +36,14 @@ const SECTIONS: Array<{ slug: string; label: string; icon: any; group: string }>
   { slug: "/margins", label: "PPI & Margins", icon: Factory, group: "Dashboard" },
   { slug: "/property", label: "Property", icon: Building2, group: "Dashboard" },
   { slug: "/outlook", label: "Outlook", icon: Telescope, group: "Dashboard" },
+  // ─── Analysis group (Phase 3b) ───
+  { slug: "/trends", label: "Trends", icon: TrendingUp, group: "Analysis" },
+  { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },
+  { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
+  { slug: "/costs", label: "Costs", icon: DollarSign, group: "Analysis" },
 ];
+
+const GROUP_ORDER = ["Dashboard", "Analysis"];
 
 const SYSTEM_LINKS = [
   { slug: "/imports", label: "Imports", icon: Upload },
@@ -62,33 +74,35 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-          <div>
-            <div className="px-2 mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-              Dashboard
+          {GROUP_ORDER.map((group) => (
+            <div key={group}>
+              <div className="px-2 mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                {group}
+              </div>
+              <div className="space-y-0.5">
+                {SECTIONS.filter((s) => s.group === group).map((s) => {
+                  const active = loc === s.slug;
+                  const Icon = s.icon;
+                  return (
+                    <Link
+                      key={s.slug}
+                      href={s.slug}
+                      data-testid={`nav-${s.slug.replace("/", "") || "overview"}`}
+                      className={cn(
+                        "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm hover-elevate",
+                        active
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                          : "text-sidebar-foreground/80",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{s.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
-            <div className="space-y-0.5">
-              {SECTIONS.map((s) => {
-                const active = loc === s.slug;
-                const Icon = s.icon;
-                return (
-                  <Link
-                    key={s.slug}
-                    href={s.slug}
-                    data-testid={`nav-${s.slug.replace("/", "") || "overview"}`}
-                    className={cn(
-                      "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm hover-elevate",
-                      active
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        : "text-sidebar-foreground/80",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{s.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+          ))}
 
           <div>
             <div className="px-2 mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
