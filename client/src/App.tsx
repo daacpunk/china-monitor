@@ -18,6 +18,7 @@ import Margins from "@/pages/Margins";
 import Property from "@/pages/Property";
 import Outlook from "@/pages/Outlook";
 import Trends from "@/pages/Trends";
+import Attribution from "@/pages/Attribution";
 import Settings from "@/pages/Settings";
 import Audit from "@/pages/Audit";
 import Imports from "@/pages/Imports";
@@ -37,6 +38,7 @@ function AppRouter() {
         <Route path="/property" component={Property} />
         <Route path="/outlook" component={Outlook} />
         <Route path="/trends" component={Trends} />
+        <Route path="/attribution" component={Attribution} />
         <Route path="/settings" component={Settings} />
         <Route path="/audit" component={Audit} />
         <Route path="/imports" component={Imports} />
