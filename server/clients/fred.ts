@@ -28,21 +28,34 @@ import { storage } from "../storage";
 const FRED_BASE = "https://api.stlouisfed.org/fred";
 const TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+function defaultDailyStart(): string {
+  // ~13 months back so 1y comparisons are always satisfiable
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - 13);
+  return d.toISOString().slice(0, 10);
+}
+
 export interface FredDataPoint {
-  date: string;   // YYYY-MM-DD → we normalize to YYYY-MM
+  date: string;   // YYYY-MM-DD when frequency="d", else YYYY-MM
   value: number | null;
 }
 
 /**
  * Fetch observations for a FRED series.
- * Returns sorted ascending array of { date: "YYYY-MM", value }.
+ * Returns sorted ascending array of { date, value }.
+ *
+ * Date format depends on `frequency`:
+ *   - "m" (default) → YYYY-MM (legacy behavior; safe for monthly series)
+ *   - "d"           → YYYY-MM-DD (preserves daily resolution for DGS10/DXY/VIX etc.)
  */
 export async function getFredSeries(
   seriesId: string,
   opts?: {
-    limit?: number;       // default 120 (10 years monthly)
+    limit?: number;                 // default 120 (10y monthly) or 365 (1y daily)
     sortOrder?: "asc" | "desc";
-    units?: string;       // e.g. "pc1" for YoY % change
+    units?: string;                 // e.g. "pc1" for YoY % change
+    frequency?: "d" | "m";          // date granularity in output (default "m")
+    observationStart?: string;      // override default 2015-01-01 (e.g. "2024-01-01" for daily)
   },
 ): Promise<FredDataPoint[]> {
   // Resolve API key
@@ -51,19 +64,25 @@ export async function getFredSeries(
     throw new Error("FRED_API_KEY not configured");
   }
 
-  const cacheKey = `fred:${seriesId}:${opts?.units ?? "lin"}:${opts?.limit ?? 120}`;
+  const frequency = opts?.frequency ?? "m";
+  const defaultLimit = frequency === "d" ? 365 : 120;
+  const limit = opts?.limit ?? defaultLimit;
+  const cacheKey = `fred:${seriesId}:${opts?.units ?? "lin"}:${limit}:${frequency}`;
 
   // Cache check
   const cached = await storage.getCache(cacheKey);
   if (cached) return cached.payloadJson as FredDataPoint[];
 
+  // For daily series default to ~1y window unless caller overrides; for monthly use 2015.
+  const obsStart = opts?.observationStart ?? (frequency === "d" ? defaultDailyStart() : "2015-01-01");
+
   const params = new URLSearchParams({
     series_id: seriesId,
     api_key: apiKey,
     file_type: "json",
-    limit: String(opts?.limit ?? 120),
+    limit: String(limit),
     sort_order: opts?.sortOrder ?? "asc",
-    observation_start: "2015-01-01",
+    observation_start: obsStart,
   });
   if (opts?.units) params.set("units", opts.units);
 
@@ -101,8 +120,8 @@ export async function getFredSeries(
   const points: FredDataPoint[] = observations
     .filter((o) => o.value !== "." && o.value !== undefined)
     .map((o) => ({
-      // FRED dates are YYYY-MM-DD → convert to YYYY-MM
-      date: String(o.date).slice(0, 7),
+      // FRED dates are YYYY-MM-DD; preserve for daily, strip to YYYY-MM for monthly
+      date: frequency === "d" ? String(o.date) : String(o.date).slice(0, 7),
       value: parseFloat(o.value),
     }))
     .filter((p) => !isNaN(p.value as number));

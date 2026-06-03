@@ -237,3 +237,35 @@ export const insertScenarioSchema = createInsertSchema(scenarios).omit({
 });
 export type InsertScenario = z.infer<typeof insertScenarioSchema>;
 export type Scenario = typeof scenarios.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Briefs — Phase 3b Session 4. Deep-dive market write-up synthesizing platform data.
+// One row per generation. `sections` holds 6 nested narrative blocks; `execSummary`
+// is the one-paragraph hero. `userNotes` is editable post-hoc by the analyst.
+// ─────────────────────────────────────────────────────────────────────────
+export const briefs = pgTable(
+  "briefs",
+  {
+    id: serial("id").primaryKey(),
+    generatedAt: timestamp("generated_at").notNull().defaultNow(),
+    asOfDate: text("as_of_date").notNull(),       // ISO YYYY-MM-DD snapshot date
+    execSummary: text("exec_summary").notNull().default(""),
+    sections: jsonb("sections").notNull(),        // { what_happened, regime_shifts, cross_asset, priced_vs_not, forward_watch, trade_implications }
+    inputsJson: jsonb("inputs_json").notNull(),   // snapshot fed to LLM (drivers, cross-asset, trends, attribution, calendar)
+    model: text("model").notNull(),               // 'claude-sonnet-4' | 'claude-haiku-4' | etc.
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    userNotes: text("user_notes").notNull().default(""),
+  },
+  (t) => ({
+    generatedIdx: index("briefs_generated_idx").on(t.generatedAt),
+  }),
+);
+
+export const insertBriefSchema = createInsertSchema(briefs).omit({
+  id: true,
+  generatedAt: true,
+});
+export type InsertBrief = z.infer<typeof insertBriefSchema>;
+export type Brief = typeof briefs.$inferSelect;

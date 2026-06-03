@@ -71,6 +71,12 @@ export interface FredConfig {
    * See: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
    */
   units?: "lin" | "pc1" | "pch" | "chg";
+  /**
+   * Date granularity:
+   *   "m" (default) — strip to YYYY-MM (legacy monthly behavior)
+   *   "d"           — preserve YYYY-MM-DD (for daily series: DGS10, DXY, VIXCLS, DCOILBRENTEU)
+   */
+  frequency?: "d" | "m";
 }
 
 /**
@@ -705,6 +711,50 @@ export const REGISTRY: Record<string, SeriesEntry> = {
       startPeriod: "2020-01",
     },
     notes: "OECD CCI monthly, amplitude-adjusted.",
+  },
+
+  // ─── Cross-asset (Phase 3b Session 4 — for Market Brief context) ──────────
+  // All daily FRED series. Provide US/global color for the China-focused brief:
+  // dollar tone, US rates, oil, copper (cyclical demand proxy), volatility.
+  dxy_index: {
+    label: "USD Broad Trade-Weighted Index",
+    unit: "index (Jan-2006=100)",
+    category: "macro",
+    fallback: "fred",
+    fred: { seriesId: "DTWEXBGS", units: "lin", frequency: "d" },
+    notes: "FRED DTWEXBGS — nominal broad USD trade-weighted index, daily. China weight ~14%.",
+  },
+  us10y_yield: {
+    label: "US 10-Year Treasury Yield",
+    unit: "%",
+    category: "macro",
+    fallback: "fred",
+    fred: { seriesId: "DGS10", units: "lin", frequency: "d" },
+    notes: "FRED DGS10 — 10-Year Treasury Constant Maturity Rate, daily.",
+  },
+  brent_crude: {
+    label: "Brent Crude Oil Spot (Europe)",
+    unit: "USD/bbl",
+    category: "macro",
+    fallback: "fred",
+    fred: { seriesId: "DCOILBRENTEU", units: "lin", frequency: "d" },
+    notes: "FRED DCOILBRENTEU — Brent Europe spot, daily.",
+  },
+  copper_lme: {
+    label: "Copper Global Price (LME)",
+    unit: "USD/MT",
+    category: "macro",
+    fallback: "fred",
+    fred: { seriesId: "PCOPPUSDM", units: "lin" }, // monthly; per user decision keep simple
+    notes: "FRED PCOPPUSDM — Global price of Copper, monthly (LME settlement reference).",
+  },
+  vix_index: {
+    label: "CBOE Volatility Index (VIX)",
+    unit: "index",
+    category: "macro",
+    fallback: "fred",
+    fred: { seriesId: "VIXCLS", units: "lin", frequency: "d" },
+    notes: "FRED VIXCLS — CBOE Volatility Index, daily.",
   },
 };
 

@@ -9,6 +9,7 @@ import {
   viewState,
   importedSeries,
   scenarios,
+  briefs,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -30,6 +31,8 @@ import type {
   InsertImportedSeries,
   Scenario,
   InsertScenario,
+  Brief,
+  InsertBrief,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -176,6 +179,20 @@ export async function bootstrapSchema(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS scenarios_quarter_idx ON scenarios(target_quarter)`,
     `CREATE INDEX IF NOT EXISTS scenarios_generated_idx ON scenarios(generated_at)`,
+    `CREATE TABLE IF NOT EXISTS briefs (
+      id SERIAL PRIMARY KEY,
+      generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      as_of_date TEXT NOT NULL,
+      exec_summary TEXT NOT NULL DEFAULT '',
+      sections JSONB NOT NULL,
+      inputs_json JSONB NOT NULL,
+      model TEXT NOT NULL,
+      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tokens_in INTEGER NOT NULL DEFAULT 0,
+      tokens_out INTEGER NOT NULL DEFAULT 0,
+      user_notes TEXT NOT NULL DEFAULT ''
+    )`,
+    `CREATE INDEX IF NOT EXISTS briefs_generated_idx ON briefs(generated_at)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -270,6 +287,13 @@ export interface IStorage {
   getLatestScenarioForQuarter(targetQuarter: string): Promise<Scenario | undefined>;
   updateScenarioEdits(id: number, patch: { baseCase?: unknown; bullCase?: unknown; bearCase?: unknown; baseProb?: number; bullProb?: number; bearProb?: number }): Promise<Scenario | undefined>;
   setScenarioHitRate(id: number, hitRate: unknown): Promise<void>;
+  // Briefs (Phase 3b Session 4)
+  createBrief(input: InsertBrief): Promise<Brief>;
+  listBriefs(limit?: number): Promise<Brief[]>;
+  getBrief(id: number): Promise<Brief | undefined>;
+  getLatestBrief(): Promise<Brief | undefined>;
+  updateBriefNotes(id: number, userNotes: string): Promise<Brief | undefined>;
+  countBriefsSince(sinceIso: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -677,6 +701,59 @@ export class DatabaseStorage implements IStorage {
       .update(scenarios)
       .set({ hitRateJson: hitRate })
       .where(eq(scenarios.id, id));
+  }
+
+  // ─── Briefs (Phase 3b Session 4) ─────────────────────────────────
+  async createBrief(input: InsertBrief): Promise<Brief> {
+    const row = await (db as any)
+      .insert(briefs)
+      .values(input)
+      .returning();
+    return row[0];
+  }
+
+  async listBriefs(limit = 20): Promise<Brief[]> {
+    const rows = await (db as any)
+      .select()
+      .from(briefs)
+      .orderBy(desc(briefs.generatedAt))
+      .limit(limit);
+    return rows;
+  }
+
+  async getBrief(id: number): Promise<Brief | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(briefs)
+      .where(eq(briefs.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getLatestBrief(): Promise<Brief | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(briefs)
+      .orderBy(desc(briefs.generatedAt))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updateBriefNotes(id: number, userNotes: string): Promise<Brief | undefined> {
+    const rows = await (db as any)
+      .update(briefs)
+      .set({ userNotes })
+      .where(eq(briefs.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async countBriefsSince(sinceIso: string): Promise<number> {
+    const result: any = await (db as any).execute(
+      sql`SELECT COUNT(*)::int AS c FROM briefs WHERE generated_at >= ${sinceIso}`,
+    );
+    const rows = result.rows ?? result;
+    return Number(rows[0]?.c ?? 0);
   }
 
   async deleteImportedSeries(seriesId: string): Promise<number> {

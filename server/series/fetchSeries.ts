@@ -406,9 +406,11 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
   // ─── Try FRED (if configured and NBS failed) ─────────────────────────────
   if (entry.fred) {
     try {
+      const freq = entry.fred.frequency ?? "m";
       const points = await getFredSeries(entry.fred.seriesId, {
         units: entry.fred.units,
-        limit: 120,
+        limit: freq === "d" ? 365 : 120,
+        frequency: freq,
       });
 
       if (points.length > 0) {

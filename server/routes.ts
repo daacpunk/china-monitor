@@ -1106,5 +1106,129 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── Briefs (Phase 3b Session 4) ──────────────────────────────────
+  /** POST /api/brief/generate
+   *  Body: { model?: LlmModel; drivers?: string[]; crossAsset?: string[]; equities?: string[]; pairs?: [{driver,equity}] }
+   *  Generates a market brief, persists it, returns the row.
+   *  Soft cap: 10 generates per UTC day. Cache TTL on the LLM call is 24h.
+   */
+  app.post("/api/brief/generate", async (req, res) => {
+    try {
+      const Body = z.object({
+        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        drivers: z.array(z.string()).optional(),
+        crossAsset: z.array(z.string()).optional(),
+        equities: z.array(z.string()).optional(),
+        pairs: z.array(z.object({ driver: z.string(), equity: z.string() })).optional(),
+      });
+      const body = Body.parse(req.body);
+
+      // Soft cap: 10 generates per rolling 24h. Cache-hit calls still count
+      // (the resulting DB row counts), which keeps the user honest about
+      // spawning new persisted rows.
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const recent = await storage.countBriefsSince(since);
+      if (recent >= 10) {
+        return res.status(429).json({
+          error: `Daily brief cap reached (${recent}/10 in last 24h). Wait or delete an older brief.`,
+          code: "daily_cap",
+        });
+      }
+
+      const { generateBrief } = await import("./analysis/brief");
+      const result = await generateBrief(body);
+
+      const row = await storage.createBrief({
+        asOfDate: result.output.asOfDate,
+        execSummary: result.output.execSummary,
+        sections: result.output.sections as any,
+        inputsJson: result.inputs as any,
+        model: result.model,
+        costUsd: result.costUsd,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        userNotes: "",
+      });
+
+      res.json({
+        brief: row,
+        costUsd: result.costUsd,
+        cacheHit: result.cacheHit,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+      });
+    } catch (err: any) {
+      const msg = err.message || String(err);
+      const status = msg.includes("Blocked by cost ceiling")
+        ? 429
+        : msg.includes("No API key")
+        ? 412
+        : 500;
+      res.status(status).json({ error: msg });
+    }
+  });
+
+  /** GET /api/brief?limit=20 — list recent briefs (slim payload). */
+  app.get("/api/brief", async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit ?? 20), 100);
+      const list = await storage.listBriefs(limit);
+      // Slim payload — omit heavy fields (sections still needed for hover preview, but inputs are big)
+      const slim = list.map((b) => ({
+        id: b.id,
+        generatedAt: b.generatedAt,
+        asOfDate: b.asOfDate,
+        execSummary: b.execSummary,
+        model: b.model,
+        costUsd: b.costUsd,
+        tokensIn: b.tokensIn,
+        tokensOut: b.tokensOut,
+        userNotes: b.userNotes,
+      }));
+      res.json({ briefs: slim });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/brief/latest — most recent brief, full payload. */
+  app.get("/api/brief/latest", async (_req, res) => {
+    try {
+      const b = await storage.getLatestBrief();
+      if (!b) return res.status(404).json({ error: "No briefs yet" });
+      res.json({ brief: b });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/brief/:id — single brief, full payload. */
+  app.get("/api/brief/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const b = await storage.getBrief(id);
+      if (!b) return res.status(404).json({ error: "Brief not found" });
+      res.json({ brief: b });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** PATCH /api/brief/:id — update user notes only (no LLM cost). */
+  app.patch("/api/brief/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const Body = z.object({ userNotes: z.string().max(20000) });
+      const { userNotes } = Body.parse(req.body);
+      const updated = await storage.updateBriefNotes(id, userNotes);
+      if (!updated) return res.status(404).json({ error: "Brief not found" });
+      res.json({ brief: updated });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   return httpServer;
 }
