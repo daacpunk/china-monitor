@@ -18,6 +18,7 @@ import {
   GitCompare,
   Sparkles,
   DollarSign,
+  Newspaper,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -40,6 +41,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/trends", label: "Trends", icon: TrendingUp, group: "Analysis" },
   { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },
   { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
+  { slug: "/brief", label: "Brief", icon: Newspaper, group: "Analysis" },
   { slug: "/costs", label: "Costs", icon: DollarSign, group: "Analysis" },
 ];
 
