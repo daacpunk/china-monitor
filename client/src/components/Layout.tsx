@@ -19,6 +19,7 @@ import {
   Sparkles,
   DollarSign,
   Newspaper,
+  Landmark as PolicyIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -37,6 +38,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/margins", label: "PPI & Margins", icon: Factory, group: "Dashboard" },
   { slug: "/property", label: "Property", icon: Building2, group: "Dashboard" },
   { slug: "/outlook", label: "Outlook", icon: Telescope, group: "Dashboard" },
+  { slug: "/policy", label: "Policy Tracker", icon: PolicyIcon, group: "Dashboard" },
   // ─── Analysis group (Phase 3b) ───
   { slug: "/trends", label: "Trends", icon: TrendingUp, group: "Analysis" },
   { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },
@@ -168,7 +170,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <Monitor className="h-3.5 w-3.5" />
             </Button>
             <div className="flex-1 text-right text-[10px] text-muted-foreground self-center pr-1">
-              Phase 1
+              Phase 4
             </div>
           </div>
         </div>

@@ -10,6 +10,7 @@ import {
   importedSeries,
   scenarios,
   briefs,
+  policyUpdates,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -33,6 +34,8 @@ import type {
   InsertScenario,
   Brief,
   InsertBrief,
+  PolicyUpdate,
+  InsertPolicyUpdate,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -193,6 +196,28 @@ export async function bootstrapSchema(): Promise<void> {
       user_notes TEXT NOT NULL DEFAULT ''
     )`,
     `CREATE INDEX IF NOT EXISTS briefs_generated_idx ON briefs(generated_at)`,
+    `CREATE TABLE IF NOT EXISTS policy_updates (
+      id SERIAL PRIMARY KEY,
+      fetched_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      published_at TEXT,
+      body TEXT NOT NULL,
+      tier INTEGER NOT NULL DEFAULT 6,
+      title TEXT NOT NULL,
+      title_zh TEXT,
+      url TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      categories JSONB NOT NULL,
+      themes JSONB NOT NULL,
+      significance TEXT NOT NULL DEFAULT 'medium',
+      significance_rationale TEXT NOT NULL DEFAULT '',
+      market_linkage JSONB NOT NULL,
+      sources JSONB NOT NULL,
+      provenance TEXT NOT NULL DEFAULT 'sonar',
+      dedupe_key TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS policy_updates_body_idx ON policy_updates(body)`,
+    `CREATE INDEX IF NOT EXISTS policy_updates_published_idx ON policy_updates(published_at)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS policy_updates_dedupe_idx ON policy_updates(dedupe_key)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -754,6 +779,61 @@ export class DatabaseStorage implements IStorage {
     );
     const rows = result.rows ?? result;
     return Number(rows[0]?.c ?? 0);
+  }
+
+  // ─── Policy updates (Phase 1) ───────────────────────────────────────────
+  async policyExists(dedupeKey: string): Promise<boolean> {
+    const rows = await (db as any)
+      .select({ id: policyUpdates.id })
+      .from(policyUpdates)
+      .where(eq(policyUpdates.dedupeKey, dedupeKey))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async insertPolicyUpdate(input: InsertPolicyUpdate): Promise<PolicyUpdate> {
+    const row = await (db as any).insert(policyUpdates).values(input).returning();
+    return row[0];
+  }
+
+  async listPolicyUpdates(opts?: {
+    body?: string;
+    theme?: string;
+    category?: string;
+    significance?: string;
+    limit?: number;
+  }): Promise<PolicyUpdate[]> {
+    const limit = opts?.limit ?? 200;
+    let rows: any[] = await (db as any)
+      .select()
+      .from(policyUpdates)
+      .orderBy(desc(policyUpdates.fetchedAt))
+      .limit(limit);
+    // JSONB array filters done in JS for driver portability (PGlite + pg).
+    if (opts?.body) rows = rows.filter((r) => r.body === opts.body);
+    if (opts?.significance) rows = rows.filter((r) => r.significance === opts.significance);
+    if (opts?.theme) rows = rows.filter((r) => Array.isArray(r.themes) && r.themes.includes(opts.theme));
+    if (opts?.category)
+      rows = rows.filter((r) => Array.isArray(r.categories) && r.categories.includes(opts.category));
+    return rows;
+  }
+
+  async getPolicyUpdate(id: number): Promise<PolicyUpdate | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(policyUpdates)
+      .where(eq(policyUpdates.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updatePolicyLinkage(id: number, marketLinkage: unknown): Promise<PolicyUpdate | undefined> {
+    const rows = await (db as any)
+      .update(policyUpdates)
+      .set({ marketLinkage })
+      .where(eq(policyUpdates.id, id))
+      .returning();
+    return rows[0];
   }
 
   async deleteImportedSeries(seriesId: string): Promise<number> {

@@ -15,6 +15,10 @@ import { listRegistry } from "./series/registry";
 import { searchSeries } from "./clients/ceic";
 import { getUpcomingReleases, getAllReleases } from "./clients/calendar";
 import { resolveApiKey } from "./keyResolver";
+import { POLICY_CHANNELS, COVERAGE_THEMES, TECH_CHANNEL_IDS } from "./policy/channels";
+import { scanChannels, EQUITY_TARGETS } from "./policy/service";
+import { PERSONAS, PERSONAS_BY_ID, DEFAULT_REDTEAM_PANEL } from "@shared/personas";
+import { buildLensPrompt, buildRedTeamPrompt } from "./analysis/personas";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -1225,6 +1229,144 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const updated = await storage.updateBriefNotes(id, userNotes);
       if (!updated) return res.status(404).json({ error: "Brief not found" });
       res.json({ brief: updated });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ===========================================================================
+  // Policy Tracker (Phase 1)
+  // ===========================================================================
+
+  /** GET /api/policy/channels - the official source channel registry. */
+  app.get("/api/policy/channels", (_req, res) => {
+    res.json({
+      channels: POLICY_CHANNELS,
+      themes: COVERAGE_THEMES,
+      techChannelIds: TECH_CHANNEL_IDS,
+      equityTargets: EQUITY_TARGETS,
+    });
+  });
+
+  /** GET /api/policy/feed?theme=&category=&body=&significance=&limit= */
+  app.get("/api/policy/feed", async (req, res) => {
+    try {
+      const updates = await storage.listPolicyUpdates({
+        body: req.query.body ? String(req.query.body) : undefined,
+        theme: req.query.theme ? String(req.query.theme) : undefined,
+        category: req.query.category ? String(req.query.category) : undefined,
+        significance: req.query.significance ? String(req.query.significance) : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      });
+      res.json({ updates });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/policy/item/:id - single policy update. */
+  app.get("/api/policy/item/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const item = await storage.getPolicyUpdate(id);
+      if (!item) return res.status(404).json({ error: "Not found" });
+      res.json({ item });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/policy/refresh { channels?, sinceDays?, lens?, classifyModel? }
+   *  On-demand Sonar scan (no background scan per design). */
+  app.post("/api/policy/refresh", async (req, res) => {
+    try {
+      const Body = z.object({
+        channels: z.array(z.string()).optional(),
+        sinceDays: z.number().int().min(1).max(120).optional(),
+        lens: z.enum(["tech", "macro", "all"]).optional(),
+        classifyModel: z.enum(["claude-haiku-4", "deepseek-chat"]).optional(),
+      });
+      const { channels, sinceDays, lens, classifyModel } = Body.parse(req.body ?? {});
+      let ids = channels;
+      if (!ids || ids.length === 0) {
+        if (lens === "tech") ids = TECH_CHANNEL_IDS;
+        else if (lens === "macro") ids = POLICY_CHANNELS.filter((c) => c.tier <= 4).map((c) => c.id);
+        else ids = POLICY_CHANNELS.map((c) => c.id);
+      }
+      const reports = await scanChannels(ids, sinceDays ?? 30, classifyModel ?? "claude-haiku-4");
+      res.json({ reports });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ===========================================================================
+  // Investor-brain personas (Phase 1)
+  // ===========================================================================
+
+  /** GET /api/personas - the persona library (for the lens selector UI). */
+  app.get("/api/personas", (_req, res) => {
+    res.json({ personas: PERSONAS, defaultRedTeam: DEFAULT_REDTEAM_PANEL });
+  });
+
+  /** POST /api/personas/lens { personaId, context, focusHint?, model? } */
+  app.post("/api/personas/lens", async (req, res) => {
+    try {
+      const Body = z.object({
+        personaId: z.string(),
+        context: z.string().min(1).max(40000),
+        focusHint: z.string().max(400).optional(),
+        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+      });
+      const { personaId, context, focusHint, model } = Body.parse(req.body);
+      if (!PERSONAS_BY_ID[personaId]) return res.status(404).json({ error: "Unknown persona" });
+      const { generateCommentary } = await import("./analysis/llm");
+      const { system, user, persona } = buildLensPrompt({ personaId, context, focusHint });
+      const result = await generateCommentary({
+        model: model ?? "claude-sonnet-4",
+        systemPrompt: system,
+        userPrompt: user,
+        actionContext: `persona_lens:${personaId}`,
+        maxOutputTokens: 1200,
+      });
+      res.json({
+        persona: { id: persona.id, name: persona.name, firm: persona.firm },
+        text: result.text,
+        costUsd: result.costUsd,
+        cacheHit: result.cacheHit,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/personas/redteam { baseThesis, context?, panel?, focusHint?, model? } */
+  app.post("/api/personas/redteam", async (req, res) => {
+    try {
+      const Body = z.object({
+        baseThesis: z.string().min(1).max(40000),
+        context: z.string().max(40000).optional(),
+        panel: z.array(z.string()).optional(),
+        focusHint: z.string().max(400).optional(),
+        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+      });
+      const { baseThesis, context, panel, focusHint, model } = Body.parse(req.body);
+      const { generateCommentary } = await import("./analysis/llm");
+      const { system, user, panel: usedPanel } = buildRedTeamPrompt({ baseThesis, context, panel, focusHint });
+      const result = await generateCommentary({
+        model: model ?? "claude-sonnet-4",
+        systemPrompt: system,
+        userPrompt: user,
+        actionContext: "persona_redteam",
+        maxOutputTokens: 1500,
+      });
+      res.json({
+        panel: usedPanel.map((p) => ({ id: p.id, name: p.name, firm: p.firm })),
+        text: result.text,
+        costUsd: result.costUsd,
+        cacheHit: result.cacheHit,
+      });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

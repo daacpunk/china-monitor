@@ -24,6 +24,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu } from "@/components/ExportMenu";
 import { AICommentaryPanel } from "@/components/AICommentaryPanel";
+import { LensPanel } from "@/components/LensPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -722,6 +723,15 @@ export default function Brief() {
 
           {/* User notes */}
           <UserNotes brief={brief} />
+
+          {/* Investor lenses & devil's-advocate red-team (Phase 1) */}
+          <LensPanel
+            context={[
+              brief.execSummary,
+              ...SECTION_META.map((m) => `${m.label}: ${brief.sections?.[m.key] ?? ""}`),
+            ].join("\n\n")}
+            focusHint={`China/HK equity strategy, as of ${brief.asOfDate}`}
+          />
         </>
       )}
 

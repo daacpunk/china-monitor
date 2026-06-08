@@ -269,3 +269,45 @@ export const insertBriefSchema = createInsertSchema(briefs).omit({
 });
 export type InsertBrief = z.infer<typeof insertBriefSchema>;
 export type Brief = typeof briefs.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Policy updates — Phase 1. One row per captured policy/regulatory item from
+// official Chinese channels (State Council, PBoC, CSRC, MOF, NDRC, MIIT, etc.).
+// Sourced via Sonar (domain-scoped) + direct fetch, classified + significance-
+// scored by a cheap LLM, then linked to equity moves (marketLinkage).
+// Provenance preserved on every record. See SPEC_PHASE1_POLICY_PERSONA_SONAR.md.
+// ─────────────────────────────────────────────────────────────────────────
+export const policyUpdates = pgTable(
+  "policy_updates",
+  {
+    id: serial("id").primaryKey(),
+    fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+    publishedAt: text("published_at"),            // ISO date if known
+    body: text("body").notNull(),                 // channel id: "pboc" | "csrc" | ...
+    tier: integer("tier").notNull().default(6),   // 1..6 authority tier
+    title: text("title").notNull(),
+    titleZh: text("title_zh"),
+    url: text("url").notNull(),                    // official source (provenance)
+    summary: text("summary").notNull().default(""),
+    categories: jsonb("categories").notNull(),     // PolicyCategory[]
+    themes: jsonb("themes").notNull(),             // coverage themes: tech, ev, ...
+    significance: text("significance").notNull().default("medium"), // high|medium|low
+    significanceRationale: text("significance_rationale").notNull().default(""),
+    marketLinkage: jsonb("market_linkage").notNull(), // MarketLinkage[]
+    sources: jsonb("sources").notNull(),           // [{name,url}] corroboration
+    provenance: text("provenance").notNull().default("sonar"), // "policy"|"sonar"
+    dedupeKey: text("dedupe_key").notNull(),       // hash(url) for idempotent upsert
+  },
+  (t) => ({
+    bodyIdx: index("policy_updates_body_idx").on(t.body),
+    publishedIdx: index("policy_updates_published_idx").on(t.publishedAt),
+    dedupeIdx: index("policy_updates_dedupe_idx").on(t.dedupeKey),
+  }),
+);
+
+export const insertPolicyUpdateSchema = createInsertSchema(policyUpdates).omit({
+  id: true,
+  fetchedAt: true,
+});
+export type InsertPolicyUpdate = z.infer<typeof insertPolicyUpdateSchema>;
+export type PolicyUpdate = typeof policyUpdates.$inferSelect;
