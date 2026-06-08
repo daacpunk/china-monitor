@@ -1,18 +1,49 @@
 # China Monitor — Dynamic Research Dashboard
 
-A React + Express + Postgres dashboard for China macro & equity research. Built as a single Node.js service that serves both the API and the SPA from one port — ideal for one-click Railway deploys.
+An institutional-grade China & Hong Kong macro + equity research platform. A single
+Node.js service serves both the API and the SPA from one port — ideal for one-click
+Railway deploys. Purpose: produce specific, comprehensive equity/macro strategy papers
+and investor presentations on the HK/China outlook, grounded in live data with full
+provenance.
 
-**Current status: Phase 1 (foundation) — UI shell, settings, audit trail, 8 dashboard sections seeded with the original static dataset.**
+**Current status: Phase 4 — live multi-source data, AI analysis suite, on-demand
+policy monitoring, and an investor-brain persona layer. Report/deck export and
+monthly/quarterly automation are the remaining build phases.**
 
-Live data integrations (CEIC, Sonar Pro, Anthropic, DeepSeek) ship in Phase 2/3.
+The defining principle: **every data point carries a provenance chip** — no stale
+training data ever surfaces unlabeled.
+
+### What's live
+- **Data aggregation** across CEIC (primary, ~9.9k subscribed CN/HK/TW series), FRED,
+  OECD, HKEX, EastMoney, AKShare (Python sidecar), Yahoo, Stooq, NBS, plus FactSet/
+  Bloomberg CSV imports. A prioritized fallback cascade with a 24h cache.
+- **Dashboard sections**: Overview, Investment/FAI, GDP & Energy, Fiscal, Equities,
+  Equity Deep-Dive, K-Shape, PPI & Margins, Property, Outlook.
+- **Analysis suite**: Trends (regime detection), Attribution (macro→equity, "not yet
+  priced" flags), Scenarios (base/bull/bear + hit-rate), Brief (LLM market write-up).
+- **Policy Tracker** (Phase 1): tech-skewed + macro policy/regulatory feed from 14
+  official Chinese channels (State Council, PBoC, SAFE, MOF, NDRC, CSRC, MIIT, CAC,
+  MOST, SAMR, MOFCOM, NEA, NFRA, Xinhua), sourced on-demand via Sonar Pro, classified
+  + significance-scored, and linked to equity-market impact (policy→index/sector/name).
+- **Investor-brain personas** (Phase 1): 20 strategists methodology-modeled (Pettis,
+  Collier, Li Lu, Zhang Lei, Robin Xing, Larry Hu + global greats). Used as selectable
+  lenses and a devil's-advocate red-team panel on the Brief.
+- **Cost guardrails + audit trail** on every paid call; provenance chips everywhere.
+
+See `SPEC_PHASE1_POLICY_PERSONA_SONAR.md` for the policy/persona/Sonar design and the
+roadmap toward strategy-paper + 45-minute-deck export.
 
 ---
 
 ## Stack
 
-- **Frontend**: React 18 · Vite · TypeScript · Tailwind · shadcn/ui · Chart.js · Wouter
+- **Frontend**: React 18 · Vite · TypeScript · Tailwind · shadcn/ui · Chart.js (with
+  TimeScale + date-fns adapter) · Wouter (hash routing) · TanStack Query
 - **Backend**: Express 5 · Node 20 · Drizzle ORM
 - **Database**: Postgres (production) / PGlite embedded (local dev fallback) — same schema, same code path
+- **AI**: Anthropic Claude (sonnet/haiku) + DeepSeek (chat/reasoner) for synthesis;
+  Perplexity **Sonar Pro** for live web/news/policy pulls with citations
+- **Sidecar**: Python AKShare service (separate Railway service) for EastMoney-blocked endpoints
 - **Hosting**: Railway (Nixpacks builder; one Postgres plugin)
 
 ---
@@ -60,7 +91,7 @@ git push -u origin main
 
 1. In your Railway project, click **+ New** → **Database** → **Add PostgreSQL**
 2. Railway auto-injects `DATABASE_URL` into your service — no manual wiring required
-3. On the next deploy, `bootstrapSchema()` creates the 8 tables idempotently at boot
+3. On the next deploy, `bootstrapSchema()` creates all tables idempotently at boot (additive, safe to re-run)
 
 ### Step 4 — Configure secrets
 
@@ -112,18 +143,19 @@ The app prefers env vars over DB-stored keys, so secrets stay out of the databas
    (DATABASE_URL set)      (local dev)
 ```
 
-### Schema (8 tables, all created by `bootstrapSchema()`)
+### Schema (created by `bootstrapSchema()`)
 
 | Table | Purpose |
 |---|---|
 | `api_keys` | Per-service key, masked display, test status |
 | `settings` | Generic key/value JSON store (TTLs, display prefs) |
-| `series_cache` | CEIC series payload cache (Phase 2) |
+| `series_cache` | Multi-source series payload cache (24h TTL) |
 | `api_call_log` | Every paid call — service, endpoint, tokens, $, latency |
 | `cost_ceilings` | Monthly $/call cap per service, hard-stop flag |
-| `watchlists` | User-saved series watchlists (Phase 3) |
-| `chart_configs` | Per-chart visualization state (Phase 3) |
-| `view_state` | UI persistence (theme, last viewed page, filters) |
+| `watchlists` / `chart_configs` / `view_state` | Watchlists, chart state, UI persistence |
+| `imported_series` | FactSet/Bloomberg CSV imports (override everything) |
+| `scenarios` / `briefs` | Scenario sets and generated market briefs |
+| `policy_updates` | Policy Tracker items + market linkage (Phase 1) |
 
 ### Cost guardrails
 
@@ -137,37 +169,36 @@ Every paid API call passes through `checkCeiling(service)` before execution.
 
 Every data point on the dashboard carries a `<ProvenanceChip>` showing source:
 
-`static` · `ceic` · `sonar` · `claude` · `deepseek` · `free` · `user`
+`static` · `ceic` · `nbs` · `fred` · `oecd` · `hkex` · `eastmoney` · `akshare` · `yahoo` · `stooq` · `sonar` · `claude` · `deepseek` · `imported` · `user`
 
 This is non-negotiable per the project brief: **no stale training data may surface without a `static` label.**
 
 ---
 
-## What ships in each phase
+## Roadmap
 
-### Phase 1 ✅ (this commit)
-- Full UI shell with sidebar + theme switcher
-- 8 dashboard sections rendering the original static dataset
-- Settings page (5 tabs)
-- Audit trail page (per-service cards, per-feature attribution, EOM forecast, filterable call log, CSV export)
-- Cost guardrails + audit logging
-- Postgres-everywhere schema with idempotent bootstrap
+### Shipped
+- **Foundation**: UI shell, Settings, Audit Trail, cost guardrails, Postgres-everywhere
+  schema with idempotent bootstrap.
+- **Data**: live CEIC + FRED + OECD + HKEX + EastMoney + AKShare + Yahoo + Stooq + NBS
+  cascade; FactSet/Bloomberg CSV imports; 24h series cache.
+- **Analysis (Phase 3b)**: Trends, Attribution, Scenarios, Brief.
+- **Phase 0 stabilization**: registered Chart.js TimeScale + date adapter and added a
+  per-route error boundary (fixed the time-axis SPA crash).
+- **Phase 1 — synthesis layer**:
+  - Sonar Pro client (cost-tracked, cited) for live web/news/policy research.
+  - Policy Tracker: 14 official channels, on-demand scan, significance scoring,
+    policy→equity market linkage. Under DASHBOARD → `/policy`.
+  - Investor-brain personas: selectable lenses + devil's-advocate red-team on the Brief.
 
-### Phase 2 (next)
-- CEIC live integrations: FAI, K-shape industrial production, PPI, property, A-shares, release calendar, exports
-- Free-source supplements: Yahoo/Stooq (A-share indices), SMM/GFEX (lithium)
-- Series cache with per-service TTL (configurable in Settings → Data Sources)
-
-### Phase 3
-- Series explorer with drill-down
-- Forecast overlays
-- User-defined watchlists
-- AI insights feed: Sonar Pro for live web pulls, Claude for synthesis, DeepSeek for batch summarization
-- Each AI call logs cost, model, tokens, latency — all in audit trail
-
-### Future / deferred
-- Cron-driven alerts on release calendar events
-- Slack/email notifications on ceiling breach
+### Next (per SPEC_PHASE1_POLICY_PERSONA_SONAR.md)
+- **Phase 2 — bottom-up equity**: sector allocation (tech/EV/battery/semi/AI/consumer)
+  → single names, surfacing AKShare financials + valuations.
+- **Phase 3 — report engine**: house view + long-form strategy note (user theme/company
+  gap-fill, Claude strongest model selectable).
+- **Phase 4 — export**: PDF + DOCX strategy paper, and a comprehensive 45-min PPTX deck
+  with embedded chart images.
+- **Phase 5 — automation**: monthly/quarterly cadence with a pre-report CEIC refresh job.
 
 ---
 
@@ -177,7 +208,15 @@ This is non-negotiable per the project brief: **no stale training data may surfa
 
 **Audit page shows `0 of $0 cap`** — `bootstrapSchema` failed to seed defaults. Restart the service; seed runs on every boot but only inserts if empty.
 
-**API key "test" button shows "ok" without calling the provider** — that's intentional in Phase 1 (length check only). Phase 2 wires real ping tests per service.
+**API key "test" button shows "ok" without calling the provider** — currently a
+length-check stub; live per-service ping tests are a pending polish item.
+
+**Policy Tracker / lenses error with "No API key configured for sonar"** — set
+`SONAR_API_KEY` on Railway (same value as your Perplexity API key) or save it on the
+Settings page. Persona lenses/red-team need `ANTHROPIC_API_KEY` (or DeepSeek).
+
+**Policy feed is empty** — by design, scans run on-demand (no background polling).
+Click "Scan" on `/policy` to pull the latest items.
 
 **Local PGlite data file is huge / corrupted** — safe to delete `./data.pgdata`; bootstrap recreates schema + defaults on next start.
 
