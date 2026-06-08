@@ -414,10 +414,15 @@ contracts are fixed here so nothing needs reworking.)
 
 ---
 
-## F. OPEN QUESTIONS FOR USER
-1. Policy poll cadence: background daily scan ON or OFF by default? (cost vs freshness)
-2. Policy Tracker: own nav group, or under DASHBOARD?
-3. Persona red-team: which personas in the default bear panel? (proposed: Marks,
-   Pettis, Collier, Druckenmiller)
-4. Confirm Opus-class as default for final paper/deck synthesis (more expensive).
-```
+## F. DECISIONS (RESOLVED 2026-06-09)
+1. **Policy poll cadence: ON-DEMAND + PRE-REPORT ONLY.** No daily background scan.
+   Scans run when the user opens the tracker or generates a report. No idle spend.
+2. **Policy Tracker placement: UNDER DASHBOARD** (not a separate nav group). New
+   `/policy` route added to the existing DASHBOARD nav section.
+3. **Default devil's-advocate red-team panel: Marks, Pettis, Collier, Druckenmiller**
+   (cycle excess, debt/rebalancing, credit plumbing, liquidity reversal). Panel is
+   still configurable in the UI, but these four are the default.
+4. **Final paper/deck synthesis model: SELECTABLE, mid-tier default.** Default to a
+   mid-tier model; user can bump to Opus-class per report for maximum depth. Tagging/
+   scoring/classification always use cheaper models (Haiku/DeepSeek). All under the
+   existing cost ceiling + audit trail.
