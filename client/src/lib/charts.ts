@@ -2,6 +2,7 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
+  TimeScale,
   PointElement,
   LineElement,
   BarElement,
@@ -11,10 +12,15 @@ import {
   Legend,
   Filler,
 } from "chart.js";
+// Date adapter is required for any chart using an x-axis of type "time".
+// Without this (and the TimeScale registration below), Chart.js throws
+// `"time" is not a registered scale`, which crashes the whole SPA.
+import "chartjs-adapter-date-fns";
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
+  TimeScale,
   PointElement,
   LineElement,
   BarElement,
