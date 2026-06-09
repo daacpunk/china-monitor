@@ -822,7 +822,6 @@ export default function Scenarios() {
       <ExportMenu
         resource="scenarios"
         query={`quarter=${encodeURIComponent(quarter)}`}
-        filename={`scenarios-${quarter}`}
         disabled={!scenario}
       />
     </div>

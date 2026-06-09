@@ -1,10 +1,9 @@
 /**
- * ExportMenu — shared dropdown that lets the user download the current page as
- * CSV, PDF, DOCX, or PPTX. Wired to /api/{resource}/export?format=...
+ * ExportMenu — shared dropdown that downloads the current resource as
+ * CSV / PDF / DOCX / PPTX. Wired to the Phase 4 export routes.
  *
- * For Phase 3b session 1, the backend routes aren't built yet, so each item
- * triggers a toast saying "Coming in session 4". Once the backend is in,
- * just remove the toast branch and let the link download trigger.
+ * Default endpoint: /api/{resource}/export?format=...
+ * Override with `path` (e.g. "/api/report/123/export") for the strategy note.
  */
 
 import { Download } from "lucide-react";
@@ -22,36 +21,35 @@ import { useToast } from "@/hooks/use-toast";
 export type ExportFormat = "csv" | "pdf" | "docx" | "pptx";
 
 export interface ExportMenuProps {
-  /** Logical resource name, e.g. "trends", "attribution", "scenarios", "costs". */
+  /** Logical resource name, e.g. "report", "policy". Used for the default URL + test ids. */
   resource: string;
+  /** Explicit endpoint path override, e.g. "/api/report/123/export". */
+  path?: string;
   /** Optional query string appended to the export URL (without leading ?). */
   query?: string;
-  /** Default filename (without extension). Defaults to `${resource}`. */
-  filename?: string;
+  /** Restrict which formats are offered. Defaults to all four. */
+  formats?: ExportFormat[];
   /** If true, formats are disabled (e.g. no data yet). */
   disabled?: boolean;
 }
 
-const FORMATS: Array<{ key: ExportFormat; label: string; ext: string }> = [
-  { key: "csv", label: "CSV (.csv)", ext: "csv" },
-  { key: "pdf", label: "PDF (.pdf)", ext: "pdf" },
-  { key: "docx", label: "Word (.docx)", ext: "docx" },
-  { key: "pptx", label: "PowerPoint (.pptx)", ext: "pptx" },
+const ALL_FORMATS: Array<{ key: ExportFormat; label: string }> = [
+  { key: "pdf", label: "PDF (.pdf)" },
+  { key: "docx", label: "Word (.docx)" },
+  { key: "pptx", label: "PowerPoint (.pptx)" },
+  { key: "csv", label: "CSV (.csv)" },
 ];
 
-export function ExportMenu({ resource, query, filename, disabled }: ExportMenuProps) {
+export function ExportMenu({ resource, path, query, formats, disabled }: ExportMenuProps) {
   const { toast } = useToast();
-
-  const fname = filename ?? resource;
+  const offered = formats ? ALL_FORMATS.filter((f) => formats.includes(f.key)) : ALL_FORMATS;
 
   function handleExport(fmt: ExportFormat) {
-    // Backend routes are added in session 4. For now show a coming-soon toast.
-    // When implemented: window.location.href = `/api/${resource}/export?format=${fmt}${query ? `&${query}` : ""}`;
-    toast({
-      title: "Export coming soon",
-      description: `${fmt.toUpperCase()} export for ${resource} arrives in the final Phase 3b session.`,
-    });
-    void fname; // currently unused; will be sent as ?filename= in session 4
+    const baseUrl = path ?? `/api/${resource}/export`;
+    const url = `${baseUrl}?format=${fmt}${query ? `&${query}` : ""}`;
+    toast({ title: `Preparing ${fmt.toUpperCase()}…`, description: "Your download will begin shortly." });
+    // Trigger the browser download.
+    window.location.href = url;
   }
 
   return (
@@ -73,7 +71,7 @@ export function ExportMenu({ resource, query, filename, disabled }: ExportMenuPr
           Download as
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {FORMATS.map((f) => (
+        {offered.map((f) => (
           <DropdownMenuItem
             key={f.key}
             onClick={() => handleExport(f.key)}

@@ -16,6 +16,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
+import { ExportMenu } from "@/components/ExportMenu";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -320,7 +321,7 @@ export default function Report() {
                 {note.mode === "data_driven" ? "Data-Driven" : "Thesis-Driven"} · as of {note.asOfDate} · {note.model}
               </div>
             </div>
-            <Badge variant="outline" className="text-[10px]">Export → Phase 4</Badge>
+            <ExportMenu resource="report" path={`/api/report/${note.id}/export`} />
           </div>
 
           {note.mode === "thesis_driven" && note.thesisVerdict && <VerdictBlock v={note.thesisVerdict} />}

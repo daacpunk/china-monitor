@@ -23,6 +23,7 @@ import { SECTOR_UNIVERSE, THEMES_BY_ID } from "./equity/universe";
 import { getAkshareValuation } from "./clients/akshare";
 import { querySonar, parseJsonArray } from "./clients/sonar";
 import { registerReportRoutes } from "./report/routes";
+import { registerExportRoutes } from "./export/routes";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -1445,6 +1446,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   registerReportRoutes(app);
+  registerExportRoutes(app);
 
   return httpServer;
 }

@@ -562,7 +562,6 @@ export default function Brief() {
       <ExportMenu
         resource="brief"
         query={brief ? `id=${brief.id}` : undefined}
-        filename={brief ? `brief-${brief.asOfDate}` : "brief"}
         disabled={!brief}
       />
     </div>

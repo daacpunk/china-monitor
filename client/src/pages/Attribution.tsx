@@ -665,7 +665,6 @@ export default function Attribution() {
         actions={
           <ExportMenu
             resource="attribution"
-            filename="attribution-snapshot"
           />
         }
         meta={

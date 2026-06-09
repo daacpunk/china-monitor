@@ -16,6 +16,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
+import { ExportMenu } from "@/components/ExportMenu";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -160,15 +161,18 @@ export default function Policy() {
         title="Policy Tracker"
         subtitle="Tech-skewed + macro policy & regulatory updates from official Chinese channels, linked to equity-market impact. Sourced on-demand via Sonar Pro."
         actions={
-          <Button
-            onClick={() => refreshMutation.mutate(lens)}
-            disabled={isRefreshing}
-            data-testid="button-refresh-policy"
-            className="gap-2"
-          >
-            {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {isRefreshing ? "Scanning…" : `Scan ${lens === "all" ? "all" : lens} channels`}
-          </Button>
+          <div className="flex items-center gap-2">
+            <ExportMenu resource="policy" formats={["csv"]} disabled={filtered.length === 0} />
+            <Button
+              onClick={() => refreshMutation.mutate(lens)}
+              disabled={isRefreshing}
+              data-testid="button-refresh-policy"
+              className="gap-2"
+            >
+              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {isRefreshing ? "Scanning…" : `Scan ${lens === "all" ? "all" : lens} channels`}
+            </Button>
+          </div>
         }
       />
 
