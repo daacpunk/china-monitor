@@ -59,34 +59,44 @@ function dedupeKey(url: string): string {
 // ── Step 1: Sonar scan of one channel ──────────────────────────────────────────
 
 export async function scanChannel(channel: PolicyChannel, sinceDays = 30): Promise<RawPolicyItem[]> {
-  const recency = sinceDays <= 1 ? "day" : sinceDays <= 7 ? "week" : "month";
+  const recency = sinceDays <= 1 ? "day" : sinceDays <= 7 ? "week" : sinceDays <= 31 ? "month" : "year";
   const system =
     "You are a research assistant for an institutional China/HK equity strategist. " +
-    "Return ONLY factual, sourced policy/regulatory announcements from official Chinese government channels. " +
-    "Never invent items. If nothing material, return an empty array. " +
-    'Output STRICT JSON: an array of {"title","titleZh","date","url","summary"} objects. No prose, no commentary.';
+    "Report factual, sourced policy/regulatory developments from the named Chinese authority. " +
+    "Prefer the official source URL, but reputable financial press (Reuters, Bloomberg, Caixin, SCMP, Xinhua) " +
+    "is acceptable as a corroborating source when the official page is not indexed. Never invent items. " +
+    'Respond with ONLY a JSON array (no prose, no code fences) of objects: ' +
+    '{"title":string,"titleZh":string,"date":string,"url":string,"summary":string}. ' +
+    "If genuinely nothing material in the window, respond with [].";
   const themes = channel.defaultThemes.join(", ");
   const user =
-    `List the most recent policy/regulatory announcements from ${channel.name} (${channel.nameZh}, ${channel.domain}) ` +
-    `in roughly the last ${sinceDays} days that are relevant to: ${themes}, or to China/HK equity markets. ` +
-    `Prefer primary official pages. Analyst focus: ${channel.signalHint} ` +
-    `For each item give title (English), titleZh (original if available), date (ISO if known), url (official source), ` +
-    `and a neutral 1-2 sentence summary. Return [] if nothing material.`;
+    `What are the most significant policy, regulatory, or announcement developments from ` +
+    `${channel.name} (${channel.nameZh}) over roughly the last ${sinceDays} days that are relevant to ` +
+    `${themes} or to China/HK equity markets? Official site: ${channel.domain}. ` +
+    `Analyst focus: ${channel.signalHint} ` +
+    `For each, give English title, original-language titleZh if available, date (ISO if known), the most ` +
+    `authoritative URL, and a neutral 1-2 sentence summary. Aim for the 3-8 most material items.`;
+
+  // Domain filter as a soft preference: include the official domain plus reputable
+  // corroborators so the search isn't starved (raw .gov.cn pages are sparsely indexed).
+  const domains = channel.domain
+    ? [channel.domain, "reuters.com", "bloomberg.com", "caixinglobal.com", "scmp.com", "xinhuanet.com"]
+    : undefined;
 
   const result = await querySonar({
     systemPrompt: system,
     userPrompt: user,
     actionContext: `policy_scan:${channel.id}`,
-    domains: [channel.domain],
-    recency: recency as "day" | "week" | "month",
-    maxOutputTokens: 1500,
+    domains,
+    recency: recency as "day" | "week" | "month" | "year",
+    maxOutputTokens: 1800,
   });
 
-  const items = parseJsonArray<RawPolicyItem>(result.text);
-  // Fall back to citations if the model returned prose but cited sources.
+  let items = parseJsonArray<RawPolicyItem>(result.text);
+  // Fall back to citations if the model returned prose/empty but cited sources.
   if (items.length === 0 && result.citations.length > 0) {
-    return result.citations.slice(0, 8).map((c) => ({
-      title: c.title || "(untitled policy item)",
+    items = result.citations.slice(0, 8).map((c) => ({
+      title: c.title || "(policy item — see source)",
       date: c.date,
       url: c.url,
       summary: c.snippet || "",
