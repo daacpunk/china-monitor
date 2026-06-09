@@ -13,6 +13,8 @@ import {
   policyUpdates,
   houseView,
   strategyNotes,
+  jobRuns,
+  notifications,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -42,6 +44,10 @@ import type {
   InsertHouseView,
   StrategyNote,
   InsertStrategyNote,
+  JobRun,
+  InsertJobRun,
+  Notification,
+  InsertNotification,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -258,6 +264,28 @@ export async function bootstrapSchema(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'draft'
     )`,
     `CREATE INDEX IF NOT EXISTS strategy_notes_created_idx ON strategy_notes(created_at)`,
+    `CREATE TABLE IF NOT EXISTS job_runs (
+      id SERIAL PRIMARY KEY,
+      started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      finished_at TIMESTAMP,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      note_id INTEGER,
+      error TEXT,
+      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+      steps JSONB NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS job_runs_started_idx ON job_runs(started_at)`,
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      link TEXT,
+      read BOOLEAN NOT NULL DEFAULT FALSE,
+      kind TEXT NOT NULL DEFAULT 'info'
+    )`,
+    `CREATE INDEX IF NOT EXISTS notifications_created_idx ON notifications(created_at)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -940,6 +968,38 @@ export class DatabaseStorage implements IStorage {
       .where(eq(strategyNotes.id, id))
       .returning();
     return rows.length > 0;
+  }
+
+  // ─── Job runs + notifications (Phase 5) ──────────────────────────────────
+  async insertJobRun(input: InsertJobRun): Promise<JobRun> {
+    const rows = await (db as any).insert(jobRuns).values(input).returning();
+    return rows[0];
+  }
+
+  async updateJobRun(id: number, patch: Partial<InsertJobRun>): Promise<JobRun | undefined> {
+    const rows = await (db as any).update(jobRuns).set(patch).where(eq(jobRuns.id, id)).returning();
+    return rows[0];
+  }
+
+  async listJobRuns(limit = 30): Promise<JobRun[]> {
+    return await (db as any).select().from(jobRuns).orderBy(desc(jobRuns.startedAt)).limit(limit);
+  }
+
+  async insertNotification(input: InsertNotification): Promise<Notification> {
+    const rows = await (db as any).insert(notifications).values(input).returning();
+    return rows[0];
+  }
+
+  async listNotifications(limit = 30): Promise<Notification[]> {
+    return await (db as any).select().from(notifications).orderBy(desc(notifications.createdAt)).limit(limit);
+  }
+
+  async markNotificationRead(id: number): Promise<void> {
+    await (db as any).update(notifications).set({ read: true }).where(eq(notifications.id, id));
+  }
+
+  async markAllNotificationsRead(): Promise<void> {
+    await (db as any).update(notifications).set({ read: true }).where(eq(notifications.read, false));
   }
 
   async deleteImportedSeries(seriesId: string): Promise<number> {

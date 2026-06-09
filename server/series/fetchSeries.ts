@@ -80,7 +80,7 @@ function applyCeicTransform(points: TimePoint[], transform: CeicConfig["transfor
  * Fetch a series by logical ID.
  * Tries sources in priority order, returns first successful result.
  */
-export async function fetchSeries(logicalId: string, _opts?: { count?: number; startDate?: string }): Promise<SeriesResult> {
+export async function fetchSeries(logicalId: string, _opts?: { count?: number; startDate?: string; force?: boolean }): Promise<SeriesResult> {
   const now = new Date().toISOString();
 
   // ─── Imported series (FactSet / Bloomberg / manual) ──────────────────────
@@ -168,7 +168,7 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
   // ─── Try CEIC FIRST if a direct seriesId is mapped (Phase 2.5) ───────────
   if (entry.ceic?.seriesId) {
     try {
-      const result = await getCeicData(entry.ceic.seriesId, { count: 60 });
+      const result = await getCeicData(entry.ceic.seriesId, { count: 60, force: _opts?.force });
       // Success path: array of TimePoints
       if (Array.isArray(result) && result.length > 0) {
         const transformed = applyCeicTransform(result, entry.ceic.transform);

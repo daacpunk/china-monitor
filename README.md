@@ -30,6 +30,12 @@ training data ever surfaces unlabeled.
 - **Investor-brain personas** (Phase 1): 20 strategists methodology-modeled (Pettis,
   Collier, Li Lu, Zhang Lei, Robin Xing, Larry Hu + global greats). Used as selectable
   lenses and a devil's-advocate red-team panel on the Brief.
+- **Strategy reports + export** (Phases 3-4): two-mode composer (Data-Driven
+  portfolio / Thesis-Driven critic), section-by-section long-form notes, a Report
+  Vault archive, and one-click PDF / DOCX / PPTX export.
+- **Automation** (Phase 5): scheduled monthly/quarterly report runs (refresh →
+  house view → note → notify), Run-now / Refresh-now triggers, run history, and an
+  in-app notification bell (+ optional email).
 - **Cost guardrails + audit trail** on every paid call; provenance chips everywhere.
 
 See `SPEC_PHASE1_POLICY_PERSONA_SONAR.md` for the policy/persona/Sonar design and the
@@ -106,6 +112,9 @@ In the service **Variables** tab, add (leave blank for now if you don't have the
 | `ANTHROPIC_API_KEY` | Claude synthesis |
 | `DEEPSEEK_API_KEY` | DeepSeek batch workloads |
 | `NODE_ENV` | `production` (Railway sets this) |
+| `AUTOMATION_TICK_TOKEN` | _(optional)_ shared secret enabling the external `POST /api/jobs/tick` trigger (send as `X-Tick-Token`). Leave unset to rely on the in-process 15-min loop. |
+| `SMTP_URL` | _(optional)_ SMTP connection string to enable automation **email** notifications (e.g. `smtp://user:pass@host:587`). |
+| `SMTP_FROM` | _(optional)_ From address for automation emails; required alongside `SMTP_URL`. |
 
 The app prefers env vars over DB-stored keys, so secrets stay out of the database on production.
 
@@ -212,9 +221,28 @@ This is non-negotiable per the project brief: **no stale training data may surfa
     captions + full source lists throughout. Neutral branding via `shared/brand.ts`.
   - `GET /api/report/:id/export?format=pdf|docx|pptx|csv`; Policy Tracker CSV export.
   - Activated `ExportMenu` on the Report page + Policy Tracker.
+- **Report Vault**: browsable archive of past strategy notes (enriched list +
+  delete) embedded on the Report page.
+- **Phase 5 — automation** (see SPEC_PHASE5_AUTOMATION.md):
+  - Automation page (`/automation`, REPORT nav group): enable a **monthly or
+    quarterly** cadence (configurable day-of-month + UTC hour, shown in HKT) that
+    runs the full pipeline — force-refresh the report's CEIC series (+ optional
+    Sonar policy scan) → propose a house-view update (auto-apply opt-in) →
+    generate a strategy note → notify.
+  - Reuses the composer controls as scheduled defaults: mode, emphasis themes,
+    featured names, synthesis model.
+  - **Run now** (full report) and **Refresh data** (series only) manual triggers,
+    plus a run-history table audited in `job_runs`.
+  - In-app **notifications** with a header bell (unread badge, mark-read /
+    mark-all-read); optional **email** delivery via SMTP (off until
+    `SMTP_URL` + `SMTP_FROM` are set).
+  - Idempotent scheduler: in-process 15-min tick loop at boot, plus a protected
+    `POST /api/jobs/tick` endpoint (guarded by `AUTOMATION_TICK_TOKEN` /
+    `X-Tick-Token`) for an external Railway cron or GitHub Action trigger. A
+    `runningAt` lock + `nextRunAt` advance prevent double-runs.
 
 ### Next
-- **Phase 5 — automation**: monthly/quarterly cadence with a pre-report CEIC refresh job.
+- **Phase 6** — TBD.
 
 ---
 

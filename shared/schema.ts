@@ -365,3 +365,44 @@ export const strategyNotes = pgTable(
 export const insertStrategyNoteSchema = createInsertSchema(strategyNotes).omit({ id: true, createdAt: true });
 export type InsertStrategyNote = z.infer<typeof insertStrategyNoteSchema>;
 export type StrategyNote = typeof strategyNotes.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 5 — Automation: job runs (audit of scheduled/manual runs) + notifications.
+// The schedule config itself lives in the `settings` k/v store under
+// "automation.schedule". See SPEC_PHASE5_AUTOMATION.md.
+// ─────────────────────────────────────────────────────────────────────────
+export const jobRuns = pgTable(
+  "job_runs",
+  {
+    id: serial("id").primaryKey(),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    finishedAt: timestamp("finished_at"),
+    kind: text("kind").notNull(),          // scheduled | manual
+    status: text("status").notNull().default("running"), // running|success|failed
+    noteId: integer("note_id"),
+    error: text("error"),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    steps: jsonb("steps").notNull(),       // {step,ok,ms,detail}[]
+  },
+  (t) => ({ startedIdx: index("job_runs_started_idx").on(t.startedAt) }),
+);
+export const insertJobRunSchema = createInsertSchema(jobRuns).omit({ id: true, startedAt: true });
+export type InsertJobRun = z.infer<typeof insertJobRunSchema>;
+export type JobRun = typeof jobRuns.$inferSelect;
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    link: text("link"),
+    read: boolean("read").notNull().default(false),
+    kind: text("kind").notNull().default("info"), // report_ready|job_failed|info
+  },
+  (t) => ({ createdIdx: index("notifications_created_idx").on(t.createdAt) }),
+);
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;

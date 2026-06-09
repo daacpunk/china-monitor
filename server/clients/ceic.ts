@@ -230,7 +230,7 @@ export async function getSeriesMetadata(id: string | number): Promise<CeicMetaRe
 
 export async function getSeriesData(
   id: string | number,
-  opts?: { count?: number; startDate?: string },
+  opts?: { count?: number; startDate?: string; force?: boolean },
 ): Promise<CeicDataResult> {
   const guard = await checkCeiling("ceic");
   if (!guard.allowed) {
@@ -240,7 +240,8 @@ export async function getSeriesData(
 
   const count = opts?.count ?? 24;
   const cacheKey = `ceic:series:${id}:${count}:${opts?.startDate ?? ""}`;
-  const cached = await storage.getCache(cacheKey);
+  // force=true bypasses the cache read (pre-report refresh, Phase 5).
+  const cached = opts?.force ? undefined : await storage.getCache(cacheKey);
   if (cached) return cached.payloadJson as CeicTimePoint[];
 
   const start = Date.now();

@@ -113,4 +113,12 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // Phase 5: start the in-process automation scheduler (DB-backed, idempotent).
+  try {
+    const { startScheduler } = await import("./automation/scheduler");
+    startScheduler();
+  } catch (err) {
+    console.error("[boot] scheduler failed to start", err);
+  }
 })();

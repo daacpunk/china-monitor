@@ -22,10 +22,12 @@ import {
   Landmark as PolicyIcon,
   Layers as SectorsIcon,
   FileText,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/NotificationBell";
 
 type NavItem = { slug: string; label: string; icon: any; group: string };
 
@@ -50,6 +52,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/costs", label: "Costs", icon: DollarSign, group: "Analysis" },
   // ─── Report group (Phase 3) ───
   { slug: "/report", label: "Strategy Report", icon: FileText, group: "Report" },
+  { slug: "/automation", label: "Automation", icon: CalendarClock, group: "Report" },
 ];
 
 const GROUP_ORDER = ["Dashboard", "Analysis", "Report"];
@@ -175,13 +178,16 @@ export function Layout({ children }: { children: ReactNode }) {
               <Monitor className="h-3.5 w-3.5" />
             </Button>
             <div className="flex-1 text-right text-[10px] text-muted-foreground self-center pr-1">
-              Phase 4
+              Phase 5
             </div>
           </div>
         </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto" data-testid="main-content">
+        <div className="sticky top-0 z-20 flex h-12 items-center justify-end gap-2 border-b bg-background/80 px-8 backdrop-blur">
+          <NotificationBell />
+        </div>
         <div className="max-w-7xl mx-auto px-8 py-6">{children}</div>
       </main>
     </div>
