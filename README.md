@@ -7,9 +7,9 @@ and investor presentations on the HK/China outlook, grounded in live data with f
 provenance.
 
 **Current status: live multi-source data, AI analysis suite, on-demand policy
-monitoring, an investor-brain persona layer, and a bottom-up sector/single-name
-equity layer. The report engine, PDF/DOCX/PPTX export, and monthly/quarterly
-automation are the remaining build phases.**
+monitoring, an investor-brain persona layer, a bottom-up sector/single-name equity
+layer, and a two-mode report engine (data-driven portfolio + thesis-driven critic).
+PDF/DOCX/PPTX export and monthly/quarterly automation are the remaining build phases.**
 
 The defining principle: **every data point carries a provenance chip** — no stale
 training data ever surfaces unlabeled.
@@ -157,6 +157,7 @@ The app prefers env vars over DB-stored keys, so secrets stay out of the databas
 | `imported_series` | FactSet/Bloomberg CSV imports (override everything) |
 | `scenarios` / `briefs` | Scenario sets and generated market briefs |
 | `policy_updates` | Policy Tracker items + market linkage (Phase 1) |
+| `house_view` / `strategy_notes` | Master house view + generated strategy papers (Phase 3) |
 
 ### Cost guardrails
 
@@ -196,10 +197,15 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   - Sector Allocation page (`/sectors`): top-down theme → drill to names → spot
     valuation (P/E, P/B, mkt cap via AKShare) + live per-name catalysts (Sonar Pro).
   - Requires the AKShare sidecar redeployed for the new `/financials/valuation` endpoint.
+- **Phase 3 — report engine** (see SPEC_PHASE3_REPORT_ENGINE.md):
+  - House view: one master standing call + per-theme stances + append-only change-log.
+  - Strategy Report page (`/report`, new REPORT nav group): two-mode composer —
+    **Data-Driven** (AI builds a strategy + model portfolio from the evidence) and
+    **Thesis-Driven** (AI stress-tests your thesis as a critic, with a verdict +
+    contradicting evidence + corrections + alternatives). Long-form note generated
+    section-by-section, each editable + regenerable; sources listed. Model selectable.
 
 ### Next
-- **Phase 3 — report engine**: house view + long-form strategy note (user theme/company
-  gap-fill, Claude strongest model selectable).
 - **Phase 4 — export**: PDF + DOCX strategy paper, and a comprehensive 45-min PPTX deck
   with embedded chart images.
 - **Phase 5 — automation**: monthly/quarterly cadence with a pre-report CEIC refresh job.
