@@ -311,3 +311,57 @@ export const insertPolicyUpdateSchema = createInsertSchema(policyUpdates).omit({
 });
 export type InsertPolicyUpdate = z.infer<typeof insertPolicyUpdateSchema>;
 export type PolicyUpdate = typeof policyUpdates.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3 — Report engine: house view + strategy notes.
+// house_view: a single evolving master view (one active row) + per-theme stances
+//   + append-only changeLog. strategy_notes: long-form papers from the two-mode
+//   composer (data-driven portfolio / thesis-driven verdict).
+// See SPEC_PHASE3_REPORT_ENGINE.md.
+// ─────────────────────────────────────────────────────────────────────────
+export const houseView = pgTable("house_view", {
+  id: serial("id").primaryKey(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  headline: text("headline").notNull().default(""),
+  stance: text("stance").notNull().default("neutral"),     // bullish|neutral|bearish|constructive|cautious
+  conviction: text("conviction").notNull().default("medium"), // low|medium|high
+  horizon: text("horizon").notNull().default("2Q"),        // 1Q|2Q|1Y
+  pillars: jsonb("pillars").notNull(),                     // string[]
+  keyRisks: jsonb("key_risks").notNull(),                  // string[]
+  sectorStance: jsonb("sector_stance").notNull(),          // {theme,stance,rationale}[]
+  changeLog: jsonb("change_log").notNull(),                // {date,change,trigger}[]
+});
+export const insertHouseViewSchema = createInsertSchema(houseView).omit({ id: true, updatedAt: true });
+export type InsertHouseView = z.infer<typeof insertHouseViewSchema>;
+export type HouseView = typeof houseView.$inferSelect;
+
+export const strategyNotes = pgTable(
+  "strategy_notes",
+  {
+    id: serial("id").primaryKey(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    title: text("title").notNull().default(""),
+    asOfDate: text("as_of_date").notNull(),
+    mode: text("mode").notNull(),                          // data_driven | thesis_driven
+    userThesis: text("user_thesis").notNull().default(""),
+    featuredNames: jsonb("featured_names").notNull(),       // string[]
+    mustInclude: jsonb("must_include").notNull(),           // string[]
+    emphasis: jsonb("emphasis").notNull(),                  // CoverageTheme[]
+    sections: jsonb("sections").notNull(),                  // StrategyNoteSection[]
+    portfolio: jsonb("portfolio"),                          // PortfolioPick[] (mode A)
+    thesisVerdict: jsonb("thesis_verdict"),                 // ThesisVerdict (mode B)
+    houseViewSnapshot: jsonb("house_view_snapshot"),        // HouseView at gen time
+    citations: jsonb("citations").notNull(),                // {name,url}[]
+    model: text("model").notNull(),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    status: text("status").notNull().default("draft"),     // draft | final
+  },
+  (t) => ({
+    createdIdx: index("strategy_notes_created_idx").on(t.createdAt),
+  }),
+);
+export const insertStrategyNoteSchema = createInsertSchema(strategyNotes).omit({ id: true, createdAt: true });
+export type InsertStrategyNote = z.infer<typeof insertStrategyNoteSchema>;
+export type StrategyNote = typeof strategyNotes.$inferSelect;

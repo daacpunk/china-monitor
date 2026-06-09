@@ -21,6 +21,7 @@ import {
   Newspaper,
   Landmark as PolicyIcon,
   Layers as SectorsIcon,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -47,9 +48,11 @@ const SECTIONS: NavItem[] = [
   { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
   { slug: "/brief", label: "Brief", icon: Newspaper, group: "Analysis" },
   { slug: "/costs", label: "Costs", icon: DollarSign, group: "Analysis" },
+  // ─── Report group (Phase 3) ───
+  { slug: "/report", label: "Strategy Report", icon: FileText, group: "Report" },
 ];
 
-const GROUP_ORDER = ["Dashboard", "Analysis"];
+const GROUP_ORDER = ["Dashboard", "Analysis", "Report"];
 
 const SYSTEM_LINKS = [
   { slug: "/imports", label: "Imports", icon: Upload },

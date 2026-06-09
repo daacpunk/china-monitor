@@ -11,6 +11,8 @@ import {
   scenarios,
   briefs,
   policyUpdates,
+  houseView,
+  strategyNotes,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -36,6 +38,10 @@ import type {
   InsertBrief,
   PolicyUpdate,
   InsertPolicyUpdate,
+  HouseView,
+  InsertHouseView,
+  StrategyNote,
+  InsertStrategyNote,
 } from "@shared/schema";
 import { eq, desc, gte, and, sql } from "drizzle-orm";
 
@@ -218,6 +224,40 @@ export async function bootstrapSchema(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS policy_updates_body_idx ON policy_updates(body)`,
     `CREATE INDEX IF NOT EXISTS policy_updates_published_idx ON policy_updates(published_at)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS policy_updates_dedupe_idx ON policy_updates(dedupe_key)`,
+    `CREATE TABLE IF NOT EXISTS house_view (
+      id SERIAL PRIMARY KEY,
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      headline TEXT NOT NULL DEFAULT '',
+      stance TEXT NOT NULL DEFAULT 'neutral',
+      conviction TEXT NOT NULL DEFAULT 'medium',
+      horizon TEXT NOT NULL DEFAULT '2Q',
+      pillars JSONB NOT NULL,
+      key_risks JSONB NOT NULL,
+      sector_stance JSONB NOT NULL,
+      change_log JSONB NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS strategy_notes (
+      id SERIAL PRIMARY KEY,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      title TEXT NOT NULL DEFAULT '',
+      as_of_date TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      user_thesis TEXT NOT NULL DEFAULT '',
+      featured_names JSONB NOT NULL,
+      must_include JSONB NOT NULL,
+      emphasis JSONB NOT NULL,
+      sections JSONB NOT NULL,
+      portfolio JSONB,
+      thesis_verdict JSONB,
+      house_view_snapshot JSONB,
+      citations JSONB NOT NULL,
+      model TEXT NOT NULL,
+      cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tokens_in INTEGER NOT NULL DEFAULT 0,
+      tokens_out INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft'
+    )`,
+    `CREATE INDEX IF NOT EXISTS strategy_notes_created_idx ON strategy_notes(created_at)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -832,6 +872,64 @@ export class DatabaseStorage implements IStorage {
       .update(policyUpdates)
       .set({ marketLinkage })
       .where(eq(policyUpdates.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  // ─── House view + strategy notes (Phase 3) ────────────────────────────────
+  async getHouseView(): Promise<HouseView | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(houseView)
+      .orderBy(desc(houseView.updatedAt))
+      .limit(1);
+    return rows[0];
+  }
+
+  async upsertHouseView(input: InsertHouseView): Promise<HouseView> {
+    const existing = await this.getHouseView();
+    if (existing) {
+      const rows = await (db as any)
+        .update(houseView)
+        .set({ ...input, updatedAt: new Date() })
+        .where(eq(houseView.id, existing.id))
+        .returning();
+      return rows[0];
+    }
+    const rows = await (db as any).insert(houseView).values(input).returning();
+    return rows[0];
+  }
+
+  async insertStrategyNote(input: InsertStrategyNote): Promise<StrategyNote> {
+    const rows = await (db as any).insert(strategyNotes).values(input).returning();
+    return rows[0];
+  }
+
+  async listStrategyNotes(limit = 50): Promise<StrategyNote[]> {
+    return await (db as any)
+      .select()
+      .from(strategyNotes)
+      .orderBy(desc(strategyNotes.createdAt))
+      .limit(limit);
+  }
+
+  async getStrategyNote(id: number): Promise<StrategyNote | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(strategyNotes)
+      .where(eq(strategyNotes.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updateStrategyNote(
+    id: number,
+    patch: Partial<InsertStrategyNote>,
+  ): Promise<StrategyNote | undefined> {
+    const rows = await (db as any)
+      .update(strategyNotes)
+      .set(patch)
+      .where(eq(strategyNotes.id, id))
       .returning();
     return rows[0];
   }

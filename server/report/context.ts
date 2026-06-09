@@ -1,0 +1,218 @@
+/**
+ * Report context assembly (Phase 3).
+ *
+ * Gathers the live, cited evidence base BEFORE any synthesis — shared by both
+ * composer modes (data-driven + thesis-driven). No hallucination: every block is
+ * real data/policy/valuation/Sonar output with provenance.
+ *
+ *   - macro + cross-asset snapshot (reuses buildBriefInputs)
+ *   - recent policy items + market linkage (Phase 1)
+ *   - sector universe + valuations + catalysts for emphasized themes / featured names (Phase 2)
+ *   - current house view
+ *   - fresh Sonar pulls (thesis / theme catalysts)
+ *
+ * Returns a compact, token-aware text digest the LLM can reason over, plus a
+ * structured citations list.
+ */
+
+import { buildBriefInputs, type BriefInputs } from "../analysis/brief";
+import { storage } from "../storage";
+import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "../equity/universe";
+import { getAkshareValuation } from "../clients/akshare";
+import { querySonar } from "../clients/sonar";
+import type { HouseView, PolicyUpdate } from "@shared/schema";
+
+export interface ReportContext {
+  asOfDate: string;
+  macroDigest: string;
+  policyDigest: string;
+  sectorDigest: string;
+  houseView: HouseView | null;
+  sonarDigest: string;
+  citations: { name: string; url: string }[];
+}
+
+function fmt(n: number | null | undefined, d = 1): string {
+  return n == null || typeof n !== "number" ? "n/a" : n.toFixed(d);
+}
+
+async function macroDigest(): Promise<{ text: string; inputs: BriefInputs }> {
+  const inputs = await buildBriefInputs();
+  const drivers = inputs.drivers
+    .map((d: any) => `  - ${d.label ?? d.id}: latest ${fmt(d.latest)} (${d.unit ?? ""}), MoM ${fmt(d.mom)}, trend ${d.trendClass ?? "n/a"} [${d.provenance ?? "?"}]`)
+    .join("\n");
+  const cross = inputs.crossAsset
+    .map((c: any) => `  - ${c.label ?? c.id}: ${fmt(c.latest, 2)} (${c.chgPct != null ? fmt(c.chgPct) + "%" : "n/a"}) [${c.provenance ?? "?"}]`)
+    .join("\n");
+  const eq = inputs.equities
+    .map((e: any) => `  - ${e.label ?? e.id}: ${fmt(e.latest, 0)} (${e.chgPct != null ? fmt(e.chgPct) + "%" : "n/a"}) [${e.provenance ?? "?"}]`)
+    .join("\n");
+  const text =
+    `As of ${inputs.asOfDate}. Breadth: ${inputs.breadth.up} up / ${inputs.breadth.down} down / ${inputs.breadth.flat} flat (${inputs.breadth.tilt}).\n` +
+    `MACRO DRIVERS:\n${drivers || "  (none)"}\n` +
+    `CROSS-ASSET:\n${cross || "  (none)"}\n` +
+    `EQUITY INDICES:\n${eq || "  (none)"}`;
+  return { text, inputs };
+}
+
+async function policyDigest(emphasis: CoverageTheme[]): Promise<{ text: string; citations: { name: string; url: string }[] }> {
+  let updates: PolicyUpdate[] = [];
+  try {
+    updates = await storage.listPolicyUpdates({ limit: 40 });
+  } catch {
+    updates = [];
+  }
+  // Prefer items touching emphasized themes; keep most significant.
+  const sigRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const ranked = updates
+    .filter((u) => (emphasis.length ? (u.themes as string[]).some((t) => emphasis.includes(t as CoverageTheme) || t === "macro") : true))
+    .sort((a, b) => (sigRank[a.significance] ?? 3) - (sigRank[b.significance] ?? 3))
+    .slice(0, 14);
+  const citations: { name: string; url: string }[] = [];
+  const lines = ranked.map((u) => {
+    citations.push({ name: `${u.body.toUpperCase()}: ${u.title}`.slice(0, 120), url: u.url });
+    const link = (u.marketLinkage as any[])
+      .map((l) => `${l.target}:${l.expectedDirection}`)
+      .join(", ");
+    return `  - [${u.body}|${u.significance}] ${u.title} — ${u.summary} (linkage: ${link || "n/a"}) <${u.url}>`;
+  });
+  return {
+    text: ranked.length ? `RECENT POLICY (official channels via Sonar):\n${lines.join("\n")}` : "RECENT POLICY: (no items scanned yet — run Policy Tracker)",
+    citations,
+  };
+}
+
+async function sectorDigest(
+  emphasis: CoverageTheme[],
+  featuredNames: string[],
+): Promise<string> {
+  const themes = emphasis.length ? emphasis.map((id) => THEMES_BY_ID[id]).filter(Boolean) : SECTOR_UNIVERSE;
+  const featured = new Set(featuredNames);
+  const blocks: string[] = [];
+  for (const t of themes) {
+    const names = t.names.map((n) => `${n.nameEn} [${n.symbol}/${n.market}, ${n.role}]: ${n.thesis}`).join("; ");
+    blocks.push(`THEME ${t.label} (proxies: ${t.indexProxies.join(", ")})\n  Drivers: ${t.drivers.join("; ")}\n  Names: ${names}`);
+  }
+  // Pull spot valuation for featured A-share names (best-effort).
+  const valLines: string[] = [];
+  const featuredAshare = SECTOR_UNIVERSE.flatMap((t) => t.names).filter(
+    (n) => featured.has(n.symbol) && n.market === "ashare",
+  );
+  await Promise.all(
+    featuredAshare.slice(0, 8).map(async (n) => {
+      try {
+        const v = await getAkshareValuation(n.symbol);
+        const d = v.data?.[0];
+        if (d) valLines.push(`  - ${n.nameEn} [${n.symbol}]: P/E(ttm) ${fmt(d.pe_ttm)}, P/B ${fmt(d.pb, 2)}, mktcap ${d.market_cap != null ? (d.market_cap / 1e8).toFixed(0) + "亿" : "n/a"} [akshare]`);
+      } catch {
+        /* skip */
+      }
+    }),
+  );
+  return (
+    `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` +
+    (valLines.length ? `\nFEATURED-NAME VALUATIONS:\n${valLines.join("\n")}` : "")
+  );
+}
+
+async function sonarDigest(
+  query: string,
+  actionContext: string,
+): Promise<{ text: string; citations: { name: string; url: string }[] }> {
+  try {
+    const r = await querySonar({
+      systemPrompt:
+        "You are a research assistant for an institutional China/HK equity strategist. " +
+        "Summarize the most relevant, recent, SOURCED facts for the query. Be factual, cite sources, " +
+        "and flag uncertainty. Do not speculate beyond the evidence.",
+      userPrompt: query,
+      actionContext,
+      recency: "month",
+      maxOutputTokens: 900,
+    });
+    const citations = r.citations.map((c) => ({ name: c.title || c.url, url: c.url }));
+    return { text: r.text ? `WEB RESEARCH (Sonar Pro):\n${r.text}` : "", citations };
+  } catch (err: any) {
+    return { text: `WEB RESEARCH: (unavailable: ${err.message})`, citations: [] };
+  }
+}
+
+export async function assembleContext(opts: {
+  mode: "data_driven" | "thesis_driven";
+  userThesis?: string;
+  emphasis: CoverageTheme[];
+  featuredNames: string[];
+}): Promise<ReportContext> {
+  const { mode, userThesis, emphasis, featuredNames } = opts;
+
+  // For thesis mode, run Sonar harder: thesis support + explicit counter-evidence.
+  const sonarTasks: Promise<{ text: string; citations: { name: string; url: string }[] }>[] = [];
+  if (mode === "thesis_driven" && userThesis) {
+    sonarTasks.push(
+      sonarDigest(
+        `Find recent evidence relevant to this China/HK equity thesis: "${userThesis}". Include both supporting and CONTRADICTING evidence with sources.`,
+        "report_thesis_evidence",
+      ),
+      sonarDigest(
+        `What is the strongest counter-argument or contradicting data against this thesis: "${userThesis}"? Cite sources.`,
+        "report_thesis_counter",
+      ),
+    );
+  } else {
+    const themeWords = (emphasis.length ? emphasis : (["tech", "ev", "battery", "semi", "ai", "consumer"] as CoverageTheme[])).join(", ");
+    sonarTasks.push(
+      sonarDigest(
+        `Most material recent catalysts, policy, and data for China/HK equity sectors: ${themeWords}. Cite sources.`,
+        "report_data_catalysts",
+      ),
+    );
+  }
+
+  const [macro, policy, sector, hv, ...sonars] = await Promise.all([
+    macroDigest(),
+    policyDigest(emphasis),
+    sectorDigest(emphasis, featuredNames),
+    storage.getHouseView().catch(() => undefined),
+    ...sonarTasks,
+  ]);
+
+  const citations = [
+    ...policy.citations,
+    ...sonars.flatMap((s) => s.citations),
+  ];
+  // Dedup citations by URL.
+  const seen = new Set<string>();
+  const dedupCitations = citations.filter((c) => c.url && !seen.has(c.url) && seen.add(c.url));
+
+  return {
+    asOfDate: macro.inputs.asOfDate,
+    macroDigest: macro.text,
+    policyDigest: policy.text,
+    sectorDigest: sector,
+    houseView: hv ?? null,
+    sonarDigest: sonars.map((s) => s.text).filter(Boolean).join("\n\n"),
+    citations: dedupCitations.slice(0, 60),
+  };
+}
+
+/** Render the full context into one prompt block for the synthesis calls. */
+export function contextToPrompt(ctx: ReportContext): string {
+  const hv = ctx.houseView
+    ? `CURRENT HOUSE VIEW: ${ctx.houseView.headline} (stance ${ctx.houseView.stance}, conviction ${ctx.houseView.conviction}, horizon ${ctx.houseView.horizon}).\n` +
+      `Pillars: ${(ctx.houseView.pillars as string[]).join("; ")}\n` +
+      `Sector stances: ${(ctx.houseView.sectorStance as any[]).map((s) => `${s.theme}:${s.stance}`).join(", ")}`
+    : "CURRENT HOUSE VIEW: (none set yet)";
+  return [
+    `=== EVIDENCE BASE (as of ${ctx.asOfDate}) ===`,
+    ctx.macroDigest,
+    "",
+    ctx.policyDigest,
+    "",
+    ctx.sectorDigest,
+    "",
+    ctx.sonarDigest,
+    "",
+    hv,
+    `=== END EVIDENCE BASE ===`,
+  ].join("\n");
+}

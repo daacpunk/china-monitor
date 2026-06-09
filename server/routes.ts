@@ -22,6 +22,7 @@ import { buildLensPrompt, buildRedTeamPrompt } from "./analysis/personas";
 import { SECTOR_UNIVERSE, THEMES_BY_ID } from "./equity/universe";
 import { getAkshareValuation } from "./clients/akshare";
 import { querySonar, parseJsonArray } from "./clients/sonar";
+import { registerReportRoutes } from "./report/routes";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -1442,6 +1443,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(400).json({ error: err.message });
     }
   });
+
+  registerReportRoutes(app);
 
   return httpServer;
 }
