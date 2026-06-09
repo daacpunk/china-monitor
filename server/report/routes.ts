@@ -73,13 +73,36 @@ export function registerReportRoutes(app: Express): void {
   // ── Strategy notes ────────────────────────────────────────────────────────────
   app.get("/api/report", async (_req, res) => {
     try {
-      const notes = await storage.listStrategyNotes(50);
+      const notes = await storage.listStrategyNotes(200);
       res.json({
         notes: notes.map((n) => ({
           id: n.id, title: n.title, asOfDate: n.asOfDate, mode: n.mode,
           createdAt: n.createdAt, status: n.status, costUsd: n.costUsd,
+          userThesis: n.userThesis ?? "",
+          emphasis: (n.emphasis as string[]) ?? [],
+          featuredCount: ((n.featuredNames as string[]) ?? []).length,
+          // a short preview = first sentence of the exec summary
+          preview: (() => {
+            const secs = (n.sections as any[]) ?? [];
+            const exec = secs.find((s) => s.key === "executive_summary") ?? secs[0];
+            const body = (exec?.body ?? "").replace(/[#*]/g, "").trim();
+            return body.slice(0, 220);
+          })(),
         })),
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** DELETE /api/report/:id - remove a saved note from the vault. */
+  app.delete("/api/report/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const ok = await storage.deleteStrategyNote(id);
+      if (!ok) return res.status(404).json({ error: "Not found" });
+      res.json({ deleted: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -934,6 +934,14 @@ export class DatabaseStorage implements IStorage {
     return rows[0];
   }
 
+  async deleteStrategyNote(id: number): Promise<boolean> {
+    const rows = await (db as any)
+      .delete(strategyNotes)
+      .where(eq(strategyNotes.id, id))
+      .returning();
+    return rows.length > 0;
+  }
+
   async deleteImportedSeries(seriesId: string): Promise<number> {
     // Get count first so we can return it regardless of driver-specific result shape.
     const cnt: any = await (db as any).execute(

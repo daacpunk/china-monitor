@@ -17,6 +17,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu } from "@/components/ExportMenu";
+import { ReportVault } from "@/components/ReportVault";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -231,7 +232,7 @@ export default function Report() {
       const body = { mode, userThesis: mode === "thesis_driven" ? thesis : undefined, emphasis, featuredNames: featured, model };
       return (await apiRequest("POST", "/api/report/generate", body)).json();
     },
-    onSuccess: (data) => { setActiveNoteId(data.note.id); toast({ title: "Report generated", description: `${data.note.sections.length} sections.` }); },
+    onSuccess: (data) => { setActiveNoteId(data.note.id); queryClient.invalidateQueries({ queryKey: ["/api/report"] }); toast({ title: "Report generated", description: `${data.note.sections.length} sections.` }); },
     onError: (e) => toast({ title: "Generation failed", description: e.message, variant: "destructive" }),
   });
 
@@ -348,12 +349,17 @@ export default function Report() {
       ) : (
         <Card className="p-10 text-center">
           <FileText className="mx-auto h-9 w-9 text-muted-foreground" />
-          <h3 className="mt-3 font-semibold">No report yet</h3>
+          <h3 className="mt-3 font-semibold">No report open</h3>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Pick a mode, set your emphasis and featured names, and generate an institutional strategy paper grounded in live data, policy, and Sonar research.
+            Generate a new report above, or open a past one from the vault below.
           </p>
         </Card>
       )}
+
+      {/* Report Vault — browsable archive of all past works */}
+      <div className="mt-6">
+        <ReportVault activeId={activeNoteId} onOpen={(id) => { setActiveNoteId(id); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+      </div>
     </div>
   );
 }
