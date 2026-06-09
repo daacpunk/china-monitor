@@ -6,9 +6,10 @@ Railway deploys. Purpose: produce specific, comprehensive equity/macro strategy 
 and investor presentations on the HK/China outlook, grounded in live data with full
 provenance.
 
-**Current status: Phase 4 — live multi-source data, AI analysis suite, on-demand
-policy monitoring, and an investor-brain persona layer. Report/deck export and
-monthly/quarterly automation are the remaining build phases.**
+**Current status: live multi-source data, AI analysis suite, on-demand policy
+monitoring, an investor-brain persona layer, and a bottom-up sector/single-name
+equity layer. The report engine, PDF/DOCX/PPTX export, and monthly/quarterly
+automation are the remaining build phases.**
 
 The defining principle: **every data point carries a provenance chip** — no stale
 training data ever surfaces unlabeled.
@@ -190,10 +191,13 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   - Policy Tracker: 14 official channels, on-demand scan, significance scoring,
     policy→equity market linkage. Under DASHBOARD → `/policy`.
   - Investor-brain personas: selectable lenses + devil's-advocate red-team on the Brief.
+- **Phase 2 — bottom-up equity** (see SPEC_PHASE2_EQUITY.md):
+  - Sector universe: 6 themes (tech/EV/battery/semi/AI/consumer) × ~7 names (A-share+HK).
+  - Sector Allocation page (`/sectors`): top-down theme → drill to names → spot
+    valuation (P/E, P/B, mkt cap via AKShare) + live per-name catalysts (Sonar Pro).
+  - Requires the AKShare sidecar redeployed for the new `/financials/valuation` endpoint.
 
-### Next (per SPEC_PHASE1_POLICY_PERSONA_SONAR.md)
-- **Phase 2 — bottom-up equity**: sector allocation (tech/EV/battery/semi/AI/consumer)
-  → single names, surfacing AKShare financials + valuations.
+### Next
 - **Phase 3 — report engine**: house view + long-form strategy note (user theme/company
   gap-fill, Claude strongest model selectable).
 - **Phase 4 — export**: PDF + DOCX strategy paper, and a comprehensive 45-min PPTX deck
