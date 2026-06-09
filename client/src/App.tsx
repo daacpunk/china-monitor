@@ -19,6 +19,7 @@ import Margins from "@/pages/Margins";
 import Property from "@/pages/Property";
 import Outlook from "@/pages/Outlook";
 import Policy from "@/pages/Policy";
+import Sectors from "@/pages/Sectors";
 import Trends from "@/pages/Trends";
 import Attribution from "@/pages/Attribution";
 import Scenarios from "@/pages/Scenarios";
@@ -45,6 +46,7 @@ function AppRouter() {
         <Route path="/property" component={Property} />
         <Route path="/outlook" component={Outlook} />
         <Route path="/policy" component={Policy} />
+        <Route path="/sectors" component={Sectors} />
         <Route path="/trends" component={Trends} />
         <Route path="/attribution" component={Attribution} />
         <Route path="/scenarios" component={Scenarios} />

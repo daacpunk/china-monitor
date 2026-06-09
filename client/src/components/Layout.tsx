@@ -20,6 +20,7 @@ import {
   DollarSign,
   Newspaper,
   Landmark as PolicyIcon,
+  Layers as SectorsIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -39,6 +40,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/property", label: "Property", icon: Building2, group: "Dashboard" },
   { slug: "/outlook", label: "Outlook", icon: Telescope, group: "Dashboard" },
   { slug: "/policy", label: "Policy Tracker", icon: PolicyIcon, group: "Dashboard" },
+  { slug: "/sectors", label: "Sector Allocation", icon: SectorsIcon, group: "Dashboard" },
   // ─── Analysis group (Phase 3b) ───
   { slug: "/trends", label: "Trends", icon: TrendingUp, group: "Analysis" },
   { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },

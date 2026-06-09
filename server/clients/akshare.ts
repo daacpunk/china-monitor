@@ -155,6 +155,32 @@ export async function getAkshareIncome(symbol: string): Promise<AkshareResponse<
   }
 }
 
+export interface AkshareValuation {
+  name?: string | null;
+  industry?: string | null;
+  market_cap?: number | null;
+  float_market_cap?: number | null;
+  pe_ttm?: number | null;
+  pe_static?: number | null;
+  pb?: number | null;
+  price?: number | null;
+  total_shares?: number | null;
+  float_shares?: number | null;
+}
+
+/** Spot valuation snapshot (PE/PB/market cap) for an A-share name. */
+export async function getAkshareValuation(
+  symbol: string,
+): Promise<AkshareResponse<AkshareValuation>> {
+  try {
+    const qs = new URLSearchParams({ symbol });
+    const r = await getJson<{ valuation: AkshareValuation }>(`/financials/valuation?${qs}`);
+    return { source: "akshare", data: [r.valuation], fetchedAt: FETCHED_AT() };
+  } catch (err: any) {
+    return { source: "akshare", data: [], fetchedAt: FETCHED_AT(), error: err.message };
+  }
+}
+
 /** Health check — useful for debug routes / startup probe. */
 export async function getAkshareHealth(): Promise<{ ok: boolean; detail: any }> {
   try {

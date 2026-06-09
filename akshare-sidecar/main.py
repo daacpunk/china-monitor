@@ -420,6 +420,79 @@ def financials_income(
     }
 
 
+@app.get("/financials/valuation")
+def financials_valuation(
+    symbol: str = Query(..., description="6-digit A-share code"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Spot valuation snapshot for an A-share name: PE, PB, market cap, etc.
+
+    Uses ak.stock_individual_info_em (东方财富 individual info), which returns a
+    key/value table including 总市值 (total mkt cap), 流通市值, 市盈率(动)/(静), 市净率,
+    行业, etc. Falls back gracefully to whatever fields are available.
+    """
+    require_auth(x_akshare_token)
+
+    if not symbol.isdigit() or len(symbol) != 6:
+        raise HTTPException(status_code=400, detail="A-share symbol must be 6 digits")
+
+    key = ("valuation", symbol)
+
+    def fetch():
+        t0 = time.time()
+        df = ak.stock_individual_info_em(symbol=symbol)
+        log.info("stock_individual_info_em %s rows=%d in %.2fs",
+                 symbol, 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return {}
+        # df has columns item/value (项目/值). Build a dict.
+        kv: Dict[str, Any] = {}
+        cols = list(df.columns)
+        item_col = cols[0]
+        val_col = cols[1] if len(cols) > 1 else cols[0]
+        for _, row in df.iterrows():
+            kv[str(row[item_col])] = row[val_col]
+        return kv
+
+    try:
+        kv = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("financials_valuation failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    def num(*keys):
+        for k in keys:
+            if k in kv and kv[k] not in (None, "", "-"):
+                try:
+                    return float(kv[k])
+                except (TypeError, ValueError):
+                    return kv[k]
+        return None
+
+    # Normalize the most useful fields (Chinese AKShare keys -> English).
+    normalized = {
+        "name": kv.get("股票简称"),
+        "industry": kv.get("行业"),
+        "market_cap": num("总市值"),
+        "float_market_cap": num("流通市值"),
+        "pe_ttm": num("市盈率(动)", "市盈率(TTM)", "市盈率"),
+        "pe_static": num("市盈率(静)"),
+        "pb": num("市净率"),
+        "price": num("最新", "最新价"),
+        "total_shares": num("总股本"),
+        "float_shares": num("流通股"),
+    }
+
+    return {
+        "source": "akshare",
+        "endpoint": "stock_individual_info_em",
+        "symbol": symbol,
+        "valuation": normalized,
+        "raw": kv,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

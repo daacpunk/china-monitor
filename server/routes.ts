@@ -19,6 +19,9 @@ import { POLICY_CHANNELS, COVERAGE_THEMES, TECH_CHANNEL_IDS } from "./policy/cha
 import { scanChannels, EQUITY_TARGETS } from "./policy/service";
 import { PERSONAS, PERSONAS_BY_ID, DEFAULT_REDTEAM_PANEL } from "@shared/personas";
 import { buildLensPrompt, buildRedTeamPrompt } from "./analysis/personas";
+import { SECTOR_UNIVERSE, THEMES_BY_ID } from "./equity/universe";
+import { getAkshareValuation } from "./clients/akshare";
+import { querySonar, parseJsonArray } from "./clients/sonar";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -1367,6 +1370,74 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         costUsd: result.costUsd,
         cacheHit: result.cacheHit,
       });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ===========================================================================
+  // Bottom-up equity layer (Phase 2)
+  // ===========================================================================
+
+  /** GET /api/equity/universe - sector themes -> constituent names. */
+  app.get("/api/equity/universe", (_req, res) => {
+    res.json({ themes: SECTOR_UNIVERSE });
+  });
+
+  /** GET /api/equity/valuation/:symbol - spot PE/PB/market cap (A-share via AKShare). */
+  app.get("/api/equity/valuation/:symbol", async (req, res) => {
+    try {
+      const symbol = String(req.params.symbol).trim();
+      const result = await getAkshareValuation(symbol);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/equity/name-catalysts { symbol, nameEn, themeId?, sinceDays? }
+   *  Recent catalysts/earnings for a single name via Sonar (cited). */
+  app.post("/api/equity/name-catalysts", async (req, res) => {
+    try {
+      const Body = z.object({
+        symbol: z.string(),
+        nameEn: z.string(),
+        nameZh: z.string().optional(),
+        themeId: z.string().optional(),
+        sinceDays: z.number().int().min(1).max(120).optional(),
+      });
+      const { symbol, nameEn, nameZh, themeId, sinceDays } = Body.parse(req.body);
+      const days = sinceDays ?? 45;
+      const recency = days <= 7 ? "week" : days <= 31 ? "month" : "year";
+      const theme = themeId ? THEMES_BY_ID[themeId]?.label : undefined;
+      const system =
+        "You are an equity analyst tracking a single China/HK-listed company for an " +
+        "institutional strategist. Report factual, sourced, recent developments only " +
+        "(earnings, guidance, orders, regulation, product, M&A). Never invent. " +
+        'Respond with ONLY a JSON array of {"date":string,"headline":string,"detail":string,"url":string,"impact":"positive"|"negative"|"neutral"}.';
+      const user =
+        `Most material developments for ${nameEn}${nameZh ? ` (${nameZh})` : ""} ` +
+        `[${symbol}]${theme ? `, a ${theme} name` : ""} over the last ${days} days that matter ` +
+        `for the equity. Give the 3-6 most important, each with date, headline, 1-sentence detail, ` +
+        `a source URL, and impact direction.`;
+      const result = await querySonar({
+        systemPrompt: system,
+        userPrompt: user,
+        actionContext: `name_news:${symbol}`,
+        recency: recency as "week" | "month" | "year",
+        maxOutputTokens: 1200,
+      });
+      let items = parseJsonArray<any>(result.text);
+      if (items.length === 0 && result.citations.length > 0) {
+        items = result.citations.slice(0, 6).map((c) => ({
+          date: c.date ?? "",
+          headline: c.title ?? "(see source)",
+          detail: c.snippet ?? "",
+          url: c.url,
+          impact: "neutral",
+        }));
+      }
+      res.json({ symbol, catalysts: items, citations: result.citations, costUsd: result.costUsd, cacheHit: result.cacheHit });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
