@@ -69,13 +69,16 @@ interface StrategyNote {
   createdAt: string;
   title: string;
   asOfDate: string;
-  // user inputs (the gap-fill brief):
-  userThesis: string;          // free-text thesis/theme
-  featuredNames: string[];     // tickers the user wants included
+  mode: "data_driven" | "thesis_driven";  // see Section C
+  // user inputs:
+  userThesis: string;          // required for thesis_driven; empty for data_driven
+  featuredNames: string[];     // tickers (Phase 2 universe)
   mustInclude: string[];       // points the user insists on
   emphasis: CoverageTheme[];   // which themes to weight
   // generated content:
   sections: StrategyNoteSection[];
+  portfolio?: PortfolioPick[]; // mode A — model portfolio
+  thesisVerdict?: ThesisVerdict; // mode B — critical verdict
   houseViewSnapshot: HouseView;// the house view as of generation
   model: string;               // synthesis model used
   costUsd: number; tokensIn: number; tokensOut: number;
@@ -113,26 +116,94 @@ citation (data provenance chip or Sonar/policy source URL) so Phase 4 can footno
 
 ---
 
-## C. USER THEME / COMPANY GAP-FILL ENGINE (the key new capability)
+## C. THE COMPOSER — TWO MODES (the key new capability)
 
-A composer where the user supplies the seed and Claude's strongest model fills the gaps.
+The composer works two ways. The user picks a `mode` up front. Both assemble the same
+live context (see C.0), but the AI's POSTURE and output differ sharply.
 
-### Flow
-1. **Compose**: user enters `userThesis` (free text), `featuredNames` (tickers),
-   `mustInclude` points, `emphasis` themes, target length, and picks the synthesis model
-   (default mid-tier, bump to Opus-class per the Phase-1 decision).
-2. **Assemble context** (server-side, no hallucination): the engine gathers
-   - latest macro/cross-asset data snapshot (existing series fetch)
-   - recent policy items + linkage (Phase 1 `/api/policy/feed`)
-   - sector universe + valuations + catalysts for emphasized themes & featured names (Phase 2)
-   - current house view
-   - optionally a fresh Sonar pull for the user's specific thesis (`event_explain`)
-3. **Generate**: a structured multi-call synthesis (section by section, so each stays
-   high-quality and within token limits) using the chosen model. Featured names are
-   guaranteed a slot; the model fills surrounding analysis, scenarios, lenses, risks.
-4. **Review & edit**: user edits any section inline; can regenerate a single section;
-   can propose/accept a house-view update.
-5. **Persist**: saved as a `strategy_note` (draft → final), versioned.
+```ts
+type ComposerMode = "data_driven" | "thesis_driven";
+```
+
+### C.0 Shared context assembly (server-side, no hallucination)
+Both modes gather, before any synthesis:
+- latest macro / cross-asset data snapshot (existing series fetch, with provenance)
+- recent policy items + market linkage (Phase 1 `/api/policy/feed`)
+- sector universe + valuations + catalysts for emphasized themes & featured names (Phase 2)
+- current house view
+- fresh Sonar Pro pulls (`event_explain` / `catalyst_scan`) for the relevant topic
+
+Every fact carries a source. The model is instructed to reason ONLY from assembled
+evidence + its general framework knowledge, and to label any claim it cannot source.
+
+---
+
+### MODE A — DATA-DRIVEN (AI leads from the evidence)
+The engine starts from the data and sources collected; the best model (toggleable)
+synthesizes an independent narrative, builds an investment strategy, and produces a
+concrete **portfolio of stock picks**. The AI forms its own view — the user does not
+supply a thesis.
+
+Extra output beyond the standard note: a **model portfolio**.
+```ts
+interface PortfolioPick {
+  symbol: string; nameEn: string; theme: CoverageTheme;
+  stance: "long" | "avoid" | "watch";
+  weight?: number;            // suggested % (longs sum ~100)
+  conviction: "low" | "medium" | "high";
+  entryRationale: string;     // why, tied to data/policy/valuation/catalyst
+  keyRisk: string;
+  sources: { name: string; url: string }[];
+}
+```
+- Picks are drawn from the Phase 2 universe, justified by the assembled evidence.
+- `sector_allocation` (OW/N/UW) + `single_names` sections are driven by the portfolio.
+- The model proposes an updated house view consistent with its conclusions (user approves).
+
+---
+
+### MODE B — THESIS-DRIVEN (test the user's conviction; be a critic, not a yes-man)
+The user supplies `userThesis`. The AI attempts to substantiate it with the collected
+data AND fresh Sonar Pro searches. **It is explicitly instructed to be intellectually
+honest, not confirmatory.** If the evidence does not support the thesis, it must say so
+directly, explain WHERE and WHY the user is wrong, and either point to the correct read
+or surface alternatives.
+
+Extra output beyond the standard note: a **thesis verdict**.
+```ts
+interface ThesisVerdict {
+  verdict: "supported" | "partially_supported" | "not_supported" | "insufficient_evidence";
+  confidence: "low" | "medium" | "high";
+  supportingEvidence: { point: string; source: { name: string; url: string } }[];
+  contradictingEvidence: { point: string; source: { name: string; url: string } }[];
+  evidenceGaps: string[];     // what's missing to reach a conclusion
+  corrections: string[];      // where/why the user is wrong (if so)
+  alternatives: string[];     // better-supported angles / alternative theses
+}
+```
+Guardrails that make Mode B honest (not sycophantic):
+- System prompt rewards finding the thesis WRONG when evidence says so; penalizes
+  agreement-by-default. "If you cannot find sufficient evidence, you MUST say the thesis
+  is unsupported and tell the user plainly."
+- Mode B runs the Sonar pull HARDER (multiple targeted searches around the thesis +
+  counter-evidence searches), and is required to populate `contradictingEvidence` and
+  `evidenceGaps` even when the verdict is "supported".
+- The devil's-advocate red-team (Phase 1) is always attached in Mode B.
+- If `insufficient_evidence`: the note leads with that verdict and the suggested
+  alternatives/next steps, rather than manufacturing a confident-sounding paper.
+
+---
+
+### Flow (both modes)
+1. **Compose**: pick `mode`; set `emphasis` themes, `featuredNames` (universe
+   autocomplete), `mustInclude`, length, and synthesis model (mid-tier default,
+   Opus-class bump). Mode B also requires `userThesis`.
+2. **Assemble context** (C.0).
+3. **Generate**: section-by-section synthesis with the mode-specific posture + the
+   mode-specific extra output (portfolio for A; thesis verdict for B).
+4. **Review & edit**: edit/regenerate any section; propose/accept a house-view update.
+5. **Persist**: saved as a `strategy_note` (with `mode`, and portfolio or verdict),
+   draft → final, versioned.
 
 ### Backend
 - `server/report/houseView.ts` — get/update/propose house view.
