@@ -182,7 +182,7 @@ async function genPortfolio(
     systemPrompt: system,
     userPrompt: user,
     actionContext: "report_portfolio",
-    maxOutputTokens: 1800,
+    maxOutputTokens: 3200,
   });
   let portfolio: PortfolioPick[] = [];
   try {
@@ -226,7 +226,7 @@ async function genVerdict(
     systemPrompt: system,
     userPrompt: user,
     actionContext: "report_thesis_verdict",
-    maxOutputTokens: 1600,
+    maxOutputTokens: 3000,
   });
   let verdict: ThesisVerdict = {
     verdict: "insufficient_evidence",
@@ -366,22 +366,56 @@ export async function regenerateSection(
   return { section: r.section, costUsd: r.cost };
 }
 
-// ── JSON parse helpers ──────────────────────────────────────────────────────────
-function extractJsonArray(text: string): any[] {
+// ── JSON parse helpers (tolerant of truncation) ─────────────────────────────────
+function stripFence(text: string): string {
   let s = (text || "").trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
-  const a = s.indexOf("["), b = s.lastIndexOf("]");
-  if (a === -1 || b === -1 || b < a) return [];
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return []; }
+  return s;
 }
+
+/**
+ * Best-effort JSON repair for outputs truncated by the token cap: trims to the
+ * last complete top-level element and closes the open bracket/brace.
+ */
+function repairJson(snippet: string, open: "[" | "{"): string {
+  const close = open === "[" ? "]" : "}";
+  // Walk and track depth + string state; record index after each top-level element.
+  let depth = 0, inStr = false, esc = false, lastComplete = -1;
+  for (let i = 0; i < snippet.length; i++) {
+    const ch = snippet[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") { depth--; if (depth === 1) lastComplete = i; }
+  }
+  if (lastComplete > 0) return snippet.slice(0, lastComplete + 1) + close;
+  return snippet + close;
+}
+
+function extractJsonArray(text: string): any[] {
+  const s = stripFence(text);
+  const a = s.indexOf("[");
+  if (a === -1) return [];
+  const b = s.lastIndexOf("]");
+  const candidate = b > a ? s.slice(a, b + 1) : s.slice(a);
+  try { return JSON.parse(candidate); } catch { /* fall through to repair */ }
+  try { return JSON.parse(repairJson(s.slice(a), "[")); } catch { return []; }
+}
+
 function extractJsonObject(text: string): any | null {
-  let s = (text || "").trim();
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a === -1 || b === -1 || b < a) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
+  const s = stripFence(text);
+  const a = s.indexOf("{");
+  if (a === -1) return null;
+  const b = s.lastIndexOf("}");
+  const candidate = b > a ? s.slice(a, b + 1) : s.slice(a);
+  try { return JSON.parse(candidate); } catch { /* fall through to repair */ }
+  try { return JSON.parse(repairJson(s.slice(a), "{")); } catch { return null; }
 }
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
