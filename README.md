@@ -8,8 +8,9 @@ provenance.
 
 **Current status: live multi-source data, AI analysis suite, on-demand policy
 monitoring, an investor-brain persona layer, a bottom-up sector/single-name equity
-layer, and a two-mode report engine (data-driven portfolio + thesis-driven critic).
-PDF/DOCX/PPTX export and monthly/quarterly automation are the remaining build phases.**
+layer, a two-mode report engine (data-driven portfolio + thesis-driven critic), and a
+full export engine (PDF + DOCX strategy paper + PPTX investor deck). Monthly/quarterly
+automation is the remaining build phase.**
 
 The defining principle: **every data point carries a provenance chip** — no stale
 training data ever surfaces unlabeled.
@@ -204,10 +205,15 @@ This is non-negotiable per the project brief: **no stale training data may surfa
     **Thesis-Driven** (AI stress-tests your thesis as a critic, with a verdict +
     contradicting evidence + corrections + alternatives). Long-form note generated
     section-by-section, each editable + regenerable; sources listed. Model selectable.
+- **Phase 4 — export engine** (see SPEC_PHASE4_EXPORT.md):
+  - One-click export of any strategy note to **PDF** (pdfmake) + **DOCX** (docx)
+    institutional paper, and a mode-aware **PPTX** investor deck (pptxgenjs).
+  - Charts rendered server-side to PNG (`@napi-rs/canvas`) and embedded; provenance
+    captions + full source lists throughout. Neutral branding via `shared/brand.ts`.
+  - `GET /api/report/:id/export?format=pdf|docx|pptx|csv`; Policy Tracker CSV export.
+  - Activated `ExportMenu` on the Report page + Policy Tracker.
 
 ### Next
-- **Phase 4 — export**: PDF + DOCX strategy paper, and a comprehensive 45-min PPTX deck
-  with embedded chart images.
 - **Phase 5 — automation**: monthly/quarterly cadence with a pre-report CEIC refresh job.
 
 ---
