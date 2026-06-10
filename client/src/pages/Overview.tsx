@@ -1,36 +1,46 @@
+/**
+ * Overview — China Dynamic Research Dashboard
+ *
+ * Investor glance-view: macro pulse · equity snapshot · house view ·
+ * policy headlines · latest strategy note · data calendar · K-shape thesis
+ *
+ * Audience: Hong Kong institutional investor (top-down macro→equity monitor).
+ */
+
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { ProvenanceChip, ProvenanceChipLive } from "@/components/ProvenanceChip";
+import { RefreshButton } from "@/components/RefreshButton";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Link } from "wouter";
 import { DATA } from "@/data/staticData";
-import { useSeries, getLatestValue } from "@/hooks/useSeries";
+import { useSeries, getLatestValue, useCalendar, useRefreshSeries } from "@/hooks/useSeries";
 import { useAnomalies, type AnomalyRow } from "@/hooks/useAnalysis";
 import { AnomalyBadge } from "@/components/AnomalyBadge";
 import { CompareButton } from "@/components/CompareModal";
+import { ExternalLink, ArrowRight } from "lucide-react";
+
+// ─── LiveStatCard ─────────────────────────────────────────────────────────────
 
 function LiveStatCard({
   label,
   logicalId,
-  unit,
   hint,
-  tone,
   suffix = "%",
   invertTone = false,
   anomalyRow,
 }: {
   label: string;
   logicalId: string;
-  unit?: string;
   hint?: string;
-  tone?: "good" | "bad" | "neutral";
   suffix?: string;
   invertTone?: boolean;
   anomalyRow?: AnomalyRow;
 }) {
-  const { data, provenance, isLoading, isError } = useSeries(logicalId) as any;
+  const { data, isLoading, isError } = useSeries(logicalId) as any;
 
   if (isLoading) {
     return (
@@ -46,16 +56,14 @@ function LiveStatCard({
   const v = latest.value;
   const hasData = v !== null;
 
-  const computedTone = tone ?? (
-    hasData
-      ? invertTone
-        ? v! < 0 ? "good" : v! > 0 ? "bad" : "neutral"
-        : v! > 0 ? "good" : v! < 0 ? "bad" : "neutral"
-      : "neutral"
-  );
+  const computedTone = hasData
+    ? invertTone
+      ? v! < 0 ? "good" : v! > 0 ? "bad" : "neutral"
+      : v! > 0 ? "good" : v! < 0 ? "bad" : "neutral"
+    : "neutral";
 
   const displayVal = hasData ? `${v! > 0 ? "+" : ""}${v!.toFixed(1)}${suffix}` : "—";
-  const deltaText = latest.date ? `${latest.date}` : isError ? "couldn't load — using static" : "";
+  const deltaText = latest.date ? latest.date : isError ? "load error" : "";
 
   return (
     <StatCard
@@ -78,7 +86,59 @@ function LiveStatCard({
   );
 }
 
-// CEIC series IDs to monitor for anomalies on Overview
+// ─── EquityRow ────────────────────────────────────────────────────────────────
+
+function EquityRow({ label, logicalId }: { label: string; logicalId: string }) {
+  const { data, isLoading } = useSeries(logicalId) as any;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-between py-2 border-b last:border-0">
+        <Skeleton className="h-4 w-24" />
+        <div className="flex gap-3">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-12" />
+        </div>
+      </div>
+    );
+  }
+
+  const pts: { date: string; value: number }[] = data?.data ?? [];
+  const last = pts[pts.length - 1] ?? null;
+  const prev = pts[pts.length - 2] ?? null;
+
+  const latestVal = last?.value ?? null;
+  const momPct =
+    latestVal !== null && prev?.value
+      ? ((latestVal - prev.value) / Math.abs(prev.value)) * 100
+      : null;
+
+  const momTone =
+    momPct === null ? "neutral" : momPct > 0 ? "good" : momPct < 0 ? "bad" : "neutral";
+  const momCls = {
+    good: "text-emerald-600 dark:text-emerald-400",
+    bad: "text-red-600 dark:text-red-400",
+    neutral: "text-muted-foreground",
+  }[momTone];
+
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b last:border-0 gap-2">
+      <div className="text-sm font-medium">{label}</div>
+      <div className="flex items-center gap-4 tabular-nums text-sm">
+        <span className="text-foreground">
+          {latestVal !== null ? latestVal.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}
+        </span>
+        <span className={`text-xs ${momCls}`}>
+          {momPct !== null ? `${momPct > 0 ? "+" : ""}${momPct.toFixed(1)}%` : "—"}
+        </span>
+        <span className="text-[11px] text-muted-foreground">{last?.date ?? ""}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Anomaly series IDs ───────────────────────────────────────────────────────
+
 const OVERVIEW_ANOMALY_IDS = [
   "gdp_yoy",
   "cpi_yoy",
@@ -97,22 +157,35 @@ const OVERVIEW_ANOMALY_IDS = [
   "fai_hitech_ytd",
 ];
 
-export default function Overview() {
-  const faiFull = useSeries("fai_total_ytd") as any;
-  const ppi = useSeries("ppi_yoy") as any;
-  const faiRE = useSeries("fai_real_estate_ytd") as any;
-  const faiHT = useSeries("fai_hitech_ytd") as any;
+// ─── Main page ────────────────────────────────────────────────────────────────
 
+export default function Overview() {
+  const ppi = useSeries("ppi_yoy") as any;
   const prov = ppi.data?.provenance;
 
-  // Bulk-fetch anomalies for all overview KPIs in one call
+  const refreshSeries = useRefreshSeries();
+
+  const KEY_MACRO_IDS = [
+    "cpi_yoy",
+    "ppi_yoy",
+    "pmi_mfg",
+    "m2_yoy",
+    "csi300_monthly",
+    "chinext_monthly",
+    "hangseng_monthly",
+  ];
+
+  async function handleGlobalRefresh() {
+    await Promise.all(KEY_MACRO_IDS.map((id) => refreshSeries(id)));
+  }
+
+  // Anomalies
   const anomalies = useAnomalies(OVERVIEW_ANOMALY_IDS);
   const anomalyById: Record<string, AnomalyRow> = {};
   (anomalies.data?.results ?? []).forEach((r) => {
     anomalyById[r.id] = r;
   });
 
-  // Surface most-severe anomalies for the banner
   const severityRank = { anomaly: 3, watch: 2, normal: 1, undefined: 0 } as Record<string, number>;
   const topAnomalies = (anomalies.data?.results ?? [])
     .filter((r) => r.anomaly && r.anomaly.severity !== "normal")
@@ -124,11 +197,51 @@ export default function Overview() {
     )
     .slice(0, 6);
 
+  // House view
+  const houseViewQuery = useQuery<{ houseView: any | null }>({
+    queryKey: ["/api/house-view"],
+    staleTime: 60 * 60 * 1000,
+    retry: 1,
+  });
+
+  // Policy feed
+  const policyQuery = useQuery<{ updates: any[] }>({
+    queryKey: ["/api/policy/feed", 6],
+    queryFn: async () => {
+      const { apiRequest } = await import("@/lib/queryClient");
+      const res = await apiRequest("GET", "/api/policy/feed?limit=6");
+      return res.json();
+    },
+    staleTime: 30 * 60 * 1000,
+    retry: 1,
+  });
+
+  // Latest report
+  const reportQuery = useQuery<{ notes: any[] }>({
+    queryKey: ["/api/report", 1],
+    queryFn: async () => {
+      const { apiRequest } = await import("@/lib/queryClient");
+      const res = await apiRequest("GET", "/api/report?limit=1");
+      return res.json();
+    },
+    staleTime: 30 * 60 * 1000,
+    retry: 1,
+  });
+
+  // Calendar
+  const calendarQuery = useCalendar(14);
+
+  const houseView = houseViewQuery.data?.houseView ?? null;
+  const policyUpdates = policyQuery.data?.updates ?? [];
+  const latestNote = reportQuery.data?.notes?.[0] ?? null;
+  const calendarReleases = calendarQuery.data?.releases?.slice(0, 6) ?? [];
+
   return (
     <div data-testid="page-overview">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <PageHeader
         title="China Dynamic Research Dashboard"
-        subtitle="Old-economy vs new-economy K-shape monitor — built for institutional investment research."
+        subtitle="Institutional top-down macro→equity monitor — K-shape divergence, policy signals, and strategy synthesis."
         meta={
           <>
             {prov ? (
@@ -136,48 +249,21 @@ export default function Overview() {
                 source={prov.source}
                 lastUpdated={prov.lastUpdated}
                 cacheHit={prov.cacheHit}
+                error={prov.error}
               />
             ) : (
               <ProvenanceChip type="static" detail="Static fallback" />
             )}
-            <Badge variant="outline" className="font-normal">Phase 2 · live data</Badge>
           </>
+        }
+        actions={
+          <RefreshButton onRefresh={handleGlobalRefresh} label="Refresh data" />
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <LiveStatCard
-          label="FAI Total YTD"
-          logicalId="fai_total_ytd"
-          tone="good"
-          hint="Year-to-date FAI growth"
-          anomalyRow={anomalyById["fai_total_ytd"]}
-        />
-        <LiveStatCard
-          label="PPI YoY"
-          logicalId="ppi_yoy"
-          tone="good"
-          hint="Producer price index"
-          anomalyRow={anomalyById["ppi_yoy"]}
-        />
-        <LiveStatCard
-          label="Property FAI YTD"
-          logicalId="fai_real_estate_ytd"
-          invertTone={true}
-          hint="Real estate investment"
-          anomalyRow={anomalyById["fai_real_estate_ytd"]}
-        />
-        <LiveStatCard
-          label="High-tech FAI YTD"
-          logicalId="fai_hitech_ytd"
-          tone="good"
-          hint="High-tech manufacturing capex"
-          anomalyRow={anomalyById["fai_hitech_ytd"]}
-        />
-      </div>
-
+      {/* ── Regime watch (anomaly banner) ──────────────────────────────────── */}
       {topAnomalies.length > 0 && (
-        <Card className="p-4 mb-6 border-amber-500/30 bg-amber-500/5">
+        <Card className="p-4 mb-6 border-amber-500/30 bg-amber-500/5" data-testid="card-regime-watch">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold flex items-center gap-2">
               Regime watch
@@ -214,6 +300,275 @@ export default function Overview() {
         </Card>
       )}
 
+      {/* ── Macro pulse ───────────────────────────────────────────────────── */}
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Macro pulse</h2>
+      </div>
+      <div
+        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"
+        data-testid="card-macro-pulse"
+      >
+        <LiveStatCard
+          label="CPI YoY"
+          logicalId="cpi_yoy"
+          hint="Consumer price index"
+          anomalyRow={anomalyById["cpi_yoy"]}
+        />
+        <LiveStatCard
+          label="PPI YoY"
+          logicalId="ppi_yoy"
+          hint="Producer price index"
+          invertTone={false}
+          anomalyRow={anomalyById["ppi_yoy"]}
+        />
+        <LiveStatCard
+          label="Mfg PMI"
+          logicalId="pmi_mfg"
+          suffix=""
+          hint="Official NBS manufacturing PMI"
+          anomalyRow={anomalyById["pmi_mfg"]}
+        />
+        <LiveStatCard
+          label="M2 YoY"
+          logicalId="m2_yoy"
+          hint="Broad money supply"
+          anomalyRow={anomalyById["m2_yoy"]}
+        />
+        <LiveStatCard
+          label="Retail YoY"
+          logicalId="retail_sales_yoy"
+          hint="Retail sales growth"
+          anomalyRow={anomalyById["retail_sales_yoy"]}
+        />
+        <LiveStatCard
+          label="Exports YoY"
+          logicalId="exports_yoy"
+          hint="Merchandise export growth"
+          anomalyRow={anomalyById["exports_yoy"]}
+        />
+      </div>
+
+      {/* ── Equity snapshot + House view ──────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+        {/* Equity snapshot */}
+        <Card className="p-5" data-testid="card-equity">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Equity markets</h2>
+            <Link href="/equity" className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              View <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="text-[11px] text-muted-foreground mb-2 tabular-nums grid grid-cols-3 gap-2 font-medium uppercase tracking-wider">
+            <span>Index</span>
+            <span className="text-right">Latest</span>
+            <span className="text-right">MoM %</span>
+          </div>
+          <EquityRow label="CSI 300" logicalId="csi300_monthly" />
+          <EquityRow label="ChiNext" logicalId="chinext_monthly" />
+          <EquityRow label="Hang Seng" logicalId="hangseng_monthly" />
+          <EquityRow label="STAR 50" logicalId="star50_close" />
+        </Card>
+
+        {/* House view */}
+        <Card className="p-5" data-testid="card-house-view">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">House view</h2>
+            {houseView && (
+              <Badge variant="outline" className="font-normal text-[10px]">
+                {houseView.conviction ?? "—"} conviction
+              </Badge>
+            )}
+          </div>
+          {houseViewQuery.isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-5/6" />
+            </div>
+          ) : houseView ? (
+            <div className="space-y-2 text-sm">
+              {houseView.stance && (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Stance</span>
+                  <Badge variant="secondary" className="font-normal">{houseView.stance}</Badge>
+                </div>
+              )}
+              {houseView.summary && (
+                <p className="text-sm text-muted-foreground leading-relaxed">{houseView.summary}</p>
+              )}
+              {houseView.asOfDate && (
+                <div className="text-[11px] text-muted-foreground">As of {houseView.asOfDate}</div>
+              )}
+              {/* Render any other string fields defensively */}
+              {Object.entries(houseView)
+                .filter(
+                  ([k, v]) =>
+                    !["stance", "conviction", "summary", "asOfDate", "id"].includes(k) &&
+                    typeof v === "string" &&
+                    v.trim().length > 0,
+                )
+                .map(([k, v]) => (
+                  <div key={k} className="text-sm">
+                    <span className="text-muted-foreground capitalize">{k}: </span>
+                    <span>{v as string}</span>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground space-y-3">
+              <p>No house view established yet.</p>
+              <Link
+                href="/report"
+                className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
+              >
+                Generate a strategy note to establish the house view
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ── Policy headlines + Latest strategy note ───────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+        {/* Policy tracker */}
+        <Card className="p-5" data-testid="card-policy">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Policy tracker — latest</h2>
+            <Link href="/policy" className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              View all <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          {policyQuery.isLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="space-y-1">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              ))}
+            </div>
+          ) : policyUpdates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No policy updates yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {policyUpdates.map((item: any) => (
+                <li key={item.id} className="border-b last:border-0 pb-2.5 last:pb-0">
+                  <div className="flex items-start gap-2 justify-between">
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium hover:underline leading-snug flex-1"
+                    >
+                      {item.title || item.titleZh || "—"}
+                      <ExternalLink className="inline h-2.5 w-2.5 ml-1 opacity-50" />
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {item.body && (
+                      <Badge variant="secondary" className="font-normal text-[10px]">
+                        {item.body}
+                      </Badge>
+                    )}
+                    {item.publishedAt && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {new Date(item.publishedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/* Latest strategy note */}
+        <Card className="p-5" data-testid="card-latest-note">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Latest strategy note</h2>
+            <Link href="/report" className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              Open <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          {reportQuery.isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ) : latestNote ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {latestNote.mode && (
+                  <Badge variant="outline" className="font-normal text-[10px]">
+                    {latestNote.mode}
+                  </Badge>
+                )}
+                {latestNote.asOfDate && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {new Date(latestNote.asOfDate).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              <div className="text-sm font-medium leading-snug">{latestNote.title}</div>
+              {latestNote.preview && (
+                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-4">
+                  {latestNote.preview.length > 280
+                    ? latestNote.preview.slice(0, 280) + "…"
+                    : latestNote.preview}
+                </p>
+              )}
+              <Link href="/report" className="text-xs text-primary hover:underline inline-flex items-center gap-0.5 mt-1">
+                Read full note <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p>No strategy notes generated yet.</p>
+              <Link href="/report" className="text-primary hover:underline text-sm inline-flex items-center gap-0.5">
+                Go to Reports <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ── Upcoming releases ─────────────────────────────────────────────── */}
+      <Card className="p-5 mb-6" data-testid="card-calendar">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Upcoming releases</h2>
+          <Badge variant="outline" className="font-normal text-[10px]">14-day window</Badge>
+        </div>
+        {calendarQuery.isLoading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-6 w-full" />
+            ))}
+          </div>
+        ) : calendarReleases.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No scheduled releases in the next 14 days.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {calendarReleases.map((r: any, i: number) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+              >
+                <span className="text-[11px] text-muted-foreground tabular-nums w-[70px] shrink-0">
+                  {r.date ?? "—"}
+                </span>
+                <span className="font-medium truncate">{r.name ?? r.indicator ?? "—"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ── K-shape thesis + Quick navigation ────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
@@ -249,62 +604,24 @@ export default function Overview() {
         <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Quick navigation</h2>
-            <Badge variant="outline" className="font-normal">8 sections</Badge>
+            <Badge variant="outline" className="font-normal">12 sections</Badge>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm">
-            <Link href="/investment" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-investment">FAI & Sub-sectors</Link>
-            <Link href="/gdp" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-gdp">GDP & Energy</Link>
+            <Link href="/investment" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-investment">FAI &amp; Sub-sectors</Link>
+            <Link href="/gdp" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-gdp">GDP &amp; Energy</Link>
             <Link href="/fiscal" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-fiscal">Fiscal / Policy</Link>
             <Link href="/equity" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-equity">Equities</Link>
             <Link href="/kshape" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-kshape">K-shape Monitor</Link>
-            <Link href="/margins" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-margins">PPI & Margins</Link>
+            <Link href="/margins" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-margins">PPI &amp; Margins</Link>
             <Link href="/property" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-property">Property</Link>
-            <Link href="/outlook" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-outlook">Outlook</Link>
+            <Link href="/report" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-report">Strategy Notes</Link>
+            <Link href="/policy" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-policy">Policy Tracker</Link>
+            <Link href="/sectors" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-sectors">Sectors</Link>
+            <Link href="/automation" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-automation">Automation</Link>
+            <Link href="/costs" className="px-3 py-2 rounded-md hover-elevate border" data-testid="link-costs">Costs</Link>
           </div>
         </Card>
       </div>
-
-      <Card className="p-5">
-        <h2 className="text-sm font-semibold mb-3">What ships in each phase</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <div className="font-medium mb-1.5">
-              <Badge variant="secondary" className="font-normal">Phase 1 — done</Badge>
-            </div>
-            <ul className="text-muted-foreground space-y-1 list-disc list-inside text-[13px]">
-              <li>8 dashboard sections (static)</li>
-              <li>Settings (4 API keys, TTLs, cost ceilings, display)</li>
-              <li>Audit trail (call log + per-feature attribution + forecast)</li>
-              <li>Postgres persistence</li>
-              <li>Theme persists across sessions</li>
-            </ul>
-          </div>
-          <div>
-            <div className="font-medium mb-1.5">
-              <Badge variant="outline" className="font-normal border-emerald-500/40 text-emerald-700 dark:text-emerald-300">Phase 2 — live ✓</Badge>
-            </div>
-            <ul className="text-muted-foreground space-y-1 list-disc list-inside text-[13px]">
-              <li>NBS live: FAI, PPI, property, PMI</li>
-              <li>A-share indices via Yahoo Finance</li>
-              <li>Release calendar (30-day rolling)</li>
-              <li>Per-chart provenance chips</li>
-              <li>CEIC search + health endpoint</li>
-            </ul>
-          </div>
-          <div>
-            <div className="font-medium mb-1.5">
-              <Badge variant="outline" className="font-normal">Phase 3 — intelligence</Badge>
-            </div>
-            <ul className="text-muted-foreground space-y-1 list-disc list-inside text-[13px]">
-              <li>Series explorer + drill-down</li>
-              <li>Custom watchlists</li>
-              <li>Sonar Pro "what's happening" queries</li>
-              <li>Claude weekly K-shape synthesis</li>
-              <li>DeepSeek batch enrichment</li>
-            </ul>
-          </div>
-        </div>
-      </Card>
     </div>
   );
 }

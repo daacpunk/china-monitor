@@ -304,7 +304,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const logicalId = req.params.logicalId;
       const count = req.query.count ? parseInt(String(req.query.count), 10) : undefined;
       const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
-      const result = await fetchSeries(logicalId, { count, startDate });
+      const force = req.query.force === "true" || req.query.force === "1";
+      const result = await fetchSeries(logicalId, { count, startDate, force });
       res.json({ logicalId, ...result });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

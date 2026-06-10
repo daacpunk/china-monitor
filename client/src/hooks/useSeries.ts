@@ -5,7 +5,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { SeriesResponse, RegistryEntry, MacroRelease } from "@shared/series";
 
 // ─── Series data hook ─────────────────────────────────────────────────────────
@@ -102,6 +102,19 @@ export function getLatestValue(data: SeriesResponse | undefined): {
   if (!data?.data?.length) return { value: null, date: null };
   const last = data.data[data.data.length - 1];
   return { value: last.value, date: last.date };
+}
+
+// ─── Force-refresh helper ─────────────────────────────────────────────────────
+
+/**
+ * Returns a stable callback that force-refreshes a single series by calling
+ * the endpoint with ?force=true, then invalidating the React Query cache.
+ */
+export function useRefreshSeries(): (logicalId: string) => Promise<void> {
+  return async (logicalId: string) => {
+    await apiRequest("GET", `/api/series/${logicalId}?force=true`);
+    await queryClient.invalidateQueries({ queryKey: ["/api/series", logicalId] });
+  };
 }
 
 export function formatValue(value: number | null, unit: string): string {

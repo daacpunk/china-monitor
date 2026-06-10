@@ -456,18 +456,37 @@ def financials_valuation(
 
     def fetch():
         t0 = time.time()
-        df = call_with_retry(lambda: ak.stock_individual_info_em(symbol=symbol))
-        log.info("stock_individual_info_em %s rows=%d in %.2fs",
-                 symbol, 0 if df is None else len(df), time.time() - t0)
-        if df is None or df.empty:
-            return {}
-        # df has columns item/value (项目/值). Build a dict.
         kv: Dict[str, Any] = {}
-        cols = list(df.columns)
-        item_col = cols[0]
-        val_col = cols[1] if len(cols) > 1 else cols[0]
-        for _, row in df.iterrows():
-            kv[str(row[item_col])] = row[val_col]
+        # Primary: EastMoney individual info (key/value table). This endpoint is
+        # currently flaky (intermittent empty/HTML -> 'Expecting value'); if it
+        # fails after retries, fall back to the all-A-share spot snapshot which
+        # is served from a different EastMoney path and stays reliable.
+        try:
+            df = call_with_retry(lambda: ak.stock_individual_info_em(symbol=symbol), attempts=2)
+            if df is not None and not df.empty:
+                cols = list(df.columns)
+                item_col = cols[0]
+                val_col = cols[1] if len(cols) > 1 else cols[0]
+                for _, row in df.iterrows():
+                    kv[str(row[item_col])] = row[val_col]
+        except Exception as ex:
+            log.warning("stock_individual_info_em failed, trying spot fallback: %s", ex)
+
+        if not kv:
+            # Fallback: ak.stock_bid_ask_em returns a key/value table incl.
+            # 总市值 / 流通市值 / 市盈率(动) / 市净率 / 最新 for a single symbol.
+            try:
+                bdf = call_with_retry(lambda: ak.stock_bid_ask_em(symbol=symbol), attempts=2)
+                if bdf is not None and not bdf.empty:
+                    cols = list(bdf.columns)
+                    item_col = cols[0]
+                    val_col = cols[1] if len(cols) > 1 else cols[0]
+                    for _, row in bdf.iterrows():
+                        kv[str(row[item_col])] = row[val_col]
+            except Exception as ex:
+                log.warning("stock_bid_ask_em fallback failed: %s", ex)
+
+        log.info("valuation %s keys=%d in %.2fs", symbol, len(kv), time.time() - t0)
         return kv
 
     try:
@@ -486,15 +505,17 @@ def financials_valuation(
         return None
 
     # Normalize the most useful fields (Chinese AKShare keys -> English).
+    # Keys differ slightly between stock_individual_info_em and stock_bid_ask_em
+    # so we probe several aliases for each metric.
     normalized = {
-        "name": kv.get("股票简称"),
+        "name": kv.get("股票简称") or kv.get("名称"),
         "industry": kv.get("行业"),
         "market_cap": num("总市值"),
         "float_market_cap": num("流通市值"),
-        "pe_ttm": num("市盈率(动)", "市盈率(TTM)", "市盈率"),
-        "pe_static": num("市盈率(静)"),
+        "pe_ttm": num("市盈率(动)", "市盈率(TTM)", "市盈率-动态", "市盈率"),
+        "pe_static": num("市盈率(静)", "市盈率-静态"),
         "pb": num("市净率"),
-        "price": num("最新", "最新价"),
+        "price": num("最新", "最新价", "最新价格"),
         "total_shares": num("总股本"),
         "float_shares": num("流通股"),
     }

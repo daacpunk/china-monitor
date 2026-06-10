@@ -1,12 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Database, Globe, Sparkles, FileText, Clock, AlertCircle } from "lucide-react";
+import { Database, Globe, Sparkles, FileText, Clock, AlertCircle, TrendingUp, Building2 } from "lucide-react";
 
 // ─── Legacy type (Phase 1) ────────────────────────────────────────────────────
 export type ProvenanceType = "static" | "ceic" | "sonar" | "claude" | "deepseek" | "free" | "user";
 
 // ─── Phase 2 extended source type ─────────────────────────────────────────────
-export type ProvenanceSource = "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static";
+export type ProvenanceSource =
+  | "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static"
+  | "akshare" | "oecd" | "hkex" | "eastmoney";
 
 const LEGACY_STYLES: Record<ProvenanceType, { label: string; cls: string; icon: any }> = {
   static:   { label: "Static (May 2026)",  cls: "bg-muted text-muted-foreground",                                   icon: FileText  },
@@ -19,13 +21,17 @@ const LEGACY_STYLES: Record<ProvenanceType, { label: string; cls: string; icon: 
 };
 
 const SOURCE_STYLES: Record<ProvenanceSource, { label: string; cls: string; icon: any }> = {
-  ceic:    { label: "CEIC",         cls: "bg-blue-500/10 text-blue-700 dark:text-blue-300",             icon: Database      },
-  nbs:     { label: "NBS",          cls: "bg-red-500/10 text-red-700 dark:text-red-300",                icon: Database      },
-  fred:    { label: "FRED",         cls: "bg-green-500/10 text-green-700 dark:text-green-300",          icon: Database      },
-  stooq:   { label: "Stooq",        cls: "bg-gray-500/10 text-gray-700 dark:text-gray-300",             icon: Globe         },
-  yahoo:   { label: "Yahoo Finance", cls: "bg-purple-500/10 text-purple-700 dark:text-purple-300",      icon: Globe         },
-  pending: { label: "Pending",       cls: "bg-amber-500/10 text-amber-700 dark:text-amber-300",          icon: AlertCircle   },
-  static:  { label: "Static",        cls: "bg-muted text-muted-foreground",                              icon: FileText      },
+  ceic:      { label: "CEIC",          cls: "bg-blue-500/10 text-blue-700 dark:text-blue-300",              icon: Database      },
+  nbs:       { label: "NBS",           cls: "bg-red-500/10 text-red-700 dark:text-red-300",                 icon: Database      },
+  fred:      { label: "FRED",          cls: "bg-green-500/10 text-green-700 dark:text-green-300",           icon: Database      },
+  stooq:     { label: "Stooq",         cls: "bg-gray-500/10 text-gray-700 dark:text-gray-300",              icon: Globe         },
+  yahoo:     { label: "Yahoo Finance",  cls: "bg-purple-500/10 text-purple-700 dark:text-purple-300",       icon: Globe         },
+  pending:   { label: "Pending",        cls: "bg-amber-500/10 text-amber-700 dark:text-amber-300",           icon: AlertCircle   },
+  static:    { label: "Static",         cls: "bg-muted text-muted-foreground",                               icon: FileText      },
+  akshare:   { label: "AKShare",        cls: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",              icon: TrendingUp    },
+  oecd:      { label: "OECD",           cls: "bg-sky-500/10 text-sky-700 dark:text-sky-300",                 icon: Globe         },
+  hkex:      { label: "HKEX",           cls: "bg-rose-500/10 text-rose-700 dark:text-rose-300",              icon: Building2     },
+  eastmoney: { label: "EastMoney",      cls: "bg-orange-500/10 text-orange-700 dark:text-orange-300",        icon: TrendingUp    },
 };
 
 // ─── Helper: humanize timestamp ───────────────────────────────────────────────
@@ -52,10 +58,37 @@ interface Phase2Props {
   error?: string;
 }
 
+/** Returns true when provenance indicates NBS unavailability or unreachable/empty fallback. */
+function isNbsFallback(source: ProvenanceSource, error?: string): boolean {
+  if (source === "pending") return true;
+  if (!error) return false;
+  const e = error.toLowerCase();
+  return e.includes("nbs") || e.includes("unreachable") || e.includes("empty");
+}
+
 export function ProvenanceChipLive({ source, lastUpdated, subscribed: _subscribed, cacheHit: _cacheHit, error }: Phase2Props) {
   const cfg = SOURCE_STYLES[source] ?? SOURCE_STYLES.pending;
   const Icon = cfg.icon;
   const humanTs = lastUpdated ? humanizeTs(lastUpdated) : null;
+
+  // Surface a clear muted note when NBS is unavailable from host
+  if (isNbsFallback(source, error)) {
+    const fallbackMsg = error
+      ? error.length > 80
+        ? error.slice(0, 80) + "…"
+        : error
+      : "NBS unavailable from host — using fallback";
+    return (
+      <Badge
+        variant="secondary"
+        className="gap-1 font-normal bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        data-testid={`provenance-live-${source}`}
+      >
+        <AlertCircle className="h-3 w-3" />
+        <span>{fallbackMsg}</span>
+      </Badge>
+    );
+  }
 
   const inner = (
     <Badge

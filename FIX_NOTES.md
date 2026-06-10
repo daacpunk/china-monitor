@@ -59,3 +59,19 @@ cross-asset: dxy_index, us10y_yield, brent_crude, copper_lme, vix_index
 - Kill: `ps aux | grep "dist/index.cjs" | grep -v grep | awk '{print $2}' | xargs -r kill` (NOT pkill).
 - Deploy detect: live bundle `curl -s URL | grep -o 'index-[A-Za-z0-9]*\.js'` vs `ls dist/public/assets/index-*.js`. Server-only changes don't change bundle hash. Railway ~3-5 min.
 - UI primitives in client/src/components/ui/: card, badge, button, switch, input, popover, scroll-area, skeleton. PageHeader supports title/subtitle/meta/actions. apiRequest(method,path,body) + queryClient in @/lib/queryClient. useToast in @/hooks/use-toast.
+
+## Endpoint shapes (verified live 2026-06-11)
+- GET /api/house-view → { houseView: null | {...} }  (currently null)
+- GET /api/report?limit=N → { notes: [{ id, title, asOfDate, mode, createdAt, status, costUsd, userThesis, emphasis, featuredCount, preview }] }
+- GET /api/policy/feed?limit=N → { updates: [{ id, fetchedAt, publishedAt, body(service), tier, title, titleZh, url }] }
+- GET /api/calendar/upcoming?days=30 → { days, count, releases:[MacroRelease] }
+- GET /api/series/:id → { logicalId, data:[{date,value}], provenance:{source,lastUpdated,subscribed,cacheHit,error} }
+  NEW: supports ?force=true to bypass cache (added to route + fetchSeries).
+- GET /api/audit/summary → { yearMonth, byService, byContext, ceilings }
+
+## Existing reusable client pieces
+- useSeries(logicalId) hook in client/src/hooks/useSeries.ts (React Query, queryKey ["/api/series", logicalId]).
+- getLatestValue(data) helper. useCalendar(days), useCeicHealth().
+- ProvenanceChipLive({source,lastUpdated,cacheHit,error}) + ProvenanceChip({type}) in client/src/components/ProvenanceChip.tsx.
+  ProvenanceSource currently = "ceic"|"nbs"|"fred"|"stooq"|"yahoo"|"pending"|"static" — note "akshare","oecd","hkex","eastmoney" may appear as source now; chip falls back to "pending" style for unknown — should add styles for akshare/oecd/hkex/eastmoney.
+- StatCard, Card, Badge, Skeleton, Button. queryClient.invalidateQueries({queryKey:["/api/series", id]}) to refetch.
