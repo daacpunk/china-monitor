@@ -472,19 +472,23 @@ def financials_valuation(
         except Exception as ex:
             log.warning("stock_individual_info_em failed, trying spot fallback: %s", ex)
 
-        if not kv:
-            # Fallback: ak.stock_bid_ask_em returns a key/value table incl.
-            # 总市值 / 流通市值 / 市盈率(动) / 市净率 / 最新 for a single symbol.
-            try:
-                bdf = call_with_retry(lambda: ak.stock_bid_ask_em(symbol=symbol), attempts=2)
-                if bdf is not None and not bdf.empty:
-                    cols = list(bdf.columns)
-                    item_col = cols[0]
-                    val_col = cols[1] if len(cols) > 1 else cols[0]
-                    for _, row in bdf.iterrows():
-                        kv[str(row[item_col])] = row[val_col]
-            except Exception as ex:
-                log.warning("stock_bid_ask_em fallback failed: %s", ex)
+        # stock_individual_info_em has NO PE/PB. Always enrich with the all-A-share
+        # spot snapshot (stock_zh_a_spot_em) which carries 市盈率-动态 / 市净率 /
+        # 总市值 / 流通市值 / 最新价 / 名称, filtered to this symbol. This is served from a
+        # different EastMoney path and stays reliable when individual_info 502s.
+        try:
+            spot = call_with_retry(lambda: ak.stock_zh_a_spot_em(), attempts=2)
+            if spot is not None and not spot.empty and "代码" in spot.columns:
+                row = spot[spot["代码"] == symbol]
+                if not row.empty:
+                    r0 = row.iloc[0]
+                    for col in spot.columns:
+                        # Don't overwrite non-empty info-em values with spot ones,
+                        # but spot is the only source of PE/PB so add those.
+                        if col not in kv or kv.get(col) in (None, "", "-"):
+                            kv[str(col)] = r0[col]
+        except Exception as ex:
+            log.warning("stock_zh_a_spot_em enrich failed: %s", ex)
 
         log.info("valuation %s keys=%d in %.2fs", symbol, len(kv), time.time() - t0)
         return kv
@@ -512,10 +516,11 @@ def financials_valuation(
         "industry": kv.get("行业"),
         "market_cap": num("总市值"),
         "float_market_cap": num("流通市值"),
-        "pe_ttm": num("市盈率(动)", "市盈率(TTM)", "市盈率-动态", "市盈率"),
+        # PE/PB come from stock_zh_a_spot_em: '市盈率-动态', '市净率'.
+        "pe_ttm": num("市盈率-动态", "市盈率(动)", "市盈率(TTM)", "市盈率"),
         "pe_static": num("市盈率(静)", "市盈率-静态"),
         "pb": num("市净率"),
-        "price": num("最新", "最新价", "最新价格"),
+        "price": num("最新价", "最新", "最新价格"),
         "total_shares": num("总股本"),
         "float_shares": num("流通股"),
     }
