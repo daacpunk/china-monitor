@@ -322,7 +322,10 @@ export default function Report() {
                 {note.mode === "data_driven" ? "Data-Driven" : "Thesis-Driven"} · as of {note.asOfDate} · {note.model}
               </div>
             </div>
-            <ExportMenu resource="report" path={`/api/report/${note.id}/export`} />
+            <div className="flex flex-col items-end gap-1">
+              <ExportMenu resource="report" path={`/api/report/${note.id}/export`} />
+              <span className="text-[10px] text-muted-foreground">PowerPoint deck · PDF · Word</span>
+            </div>
           </div>
 
           {note.mode === "thesis_driven" && note.thesisVerdict && <VerdictBlock v={note.thesisVerdict} />}
