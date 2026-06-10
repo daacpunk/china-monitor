@@ -490,6 +490,28 @@ def financials_valuation(
         except Exception as ex:
             log.warning("stock_zh_a_spot_em enrich failed: %s", ex)
 
+        # Last resort for PE/PB: Legulegu indicator series (Sina/legulegu host,
+        # not EastMoney) — returns daily pe/pe_ttm/pb/ps/dv_ratio/total_mv.
+        if kv.get("市盈率-动态") in (None, "", "-") and kv.get("市净率") in (None, "", "-"):
+            try:
+                ind = call_with_retry(
+                    lambda: ak.stock_a_indicator_lg(symbol=symbol), attempts=2)
+                if ind is not None and not ind.empty:
+                    last = ind.sort_values(ind.columns[0]).iloc[-1]
+                    # columns: trade_date, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm, total_mv
+                    if "pe_ttm" in ind.columns:
+                        kv.setdefault("市盈率-动态", last.get("pe_ttm"))
+                    if "pb" in ind.columns:
+                        kv.setdefault("市净率", last.get("pb"))
+                    if "total_mv" in ind.columns and kv.get("总市值") in (None, "", "-"):
+                        # total_mv is in 万元 (10k CNY) -> convert to 元
+                        try:
+                            kv["总市值"] = float(last.get("total_mv")) * 1e4
+                        except (TypeError, ValueError):
+                            pass
+            except Exception as ex:
+                log.warning("stock_a_indicator_lg fallback failed: %s", ex)
+
         log.info("valuation %s keys=%d in %.2fs", symbol, len(kv), time.time() - t0)
         return kv
 
