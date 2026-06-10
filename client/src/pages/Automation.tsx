@@ -10,6 +10,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -71,6 +72,8 @@ function fmtDate(s?: string | null): string {
 
 export default function Automation() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
+  const [lastNoteId, setLastNoteId] = useState<number | null>(null);
 
   const configQuery = useQuery<{ config: AutomationConfig; jobs: JobRun[] }, Error>({
     queryKey: ["/api/automation"],
@@ -111,7 +114,13 @@ export default function Automation() {
       queryClient.invalidateQueries({ queryKey: ["/api/automation"] });
       queryClient.invalidateQueries({ queryKey: ["/api/report"] });
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
-      toast({ title: "Report generated", description: data.noteId ? `Note #${data.noteId}` : data.status });
+      if (data.noteId) setLastNoteId(data.noteId);
+      toast({
+        title: "Report generated",
+        description: data.noteId
+          ? `Note #${data.noteId} — view it on the Report page`
+          : data.status,
+      });
     },
     onError: (e: Error) => toast({ title: "Run failed", description: e.message, variant: "destructive" }),
   });
@@ -184,6 +193,27 @@ export default function Automation() {
       {runNowMutation.isPending && (
         <div className="mb-4 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           Running the full pipeline (refresh → house view → strategy note). This takes ~1-3 minutes.
+        </div>
+      )}
+
+      {!runNowMutation.isPending && lastNoteId != null && (
+        <div
+          className="mb-4 flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs"
+          data-testid="panel-last-run"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+          <span className="text-muted-foreground">
+            Last run produced <span className="font-medium text-foreground">Note #{lastNoteId}</span>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto h-6 text-xs"
+            onClick={() => navigate("/report")}
+            data-testid="button-view-report"
+          >
+            View generated report
+          </Button>
         </div>
       )}
 

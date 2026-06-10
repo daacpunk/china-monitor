@@ -144,6 +144,9 @@ export interface SeriesEntry {
   hkex?: HkexConfig;
   eastmoney?: EastMoneyConfig;
   akshare?: AkshareConfig;
+  /** AKShare macro series (CPI/PPI YoY) via sidecar /macro/* — tried FIRST and
+   *  used when it is fresher than CEIC/FRED (NBS-current, not US-IP-blocked). */
+  akshareMacro?: "cpi" | "ppi";
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -225,20 +228,23 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "margins",
     fallback: "ceic",
+    akshareMacro: "ppi",
     ceic: { seriesId: 313572201, searchKeyword: "Producer Price Index", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A07010101" },
-    fred: { seriesId: "CHNPPIINDUSTRY", units: "pc1" },
-    notes: "CEIC: Producer Price Index: YoY: Monthly: China (id=313572201).",
+    // NOTE: FRED CHNPPIINDUSTRY is invalid; the real China PPI YoY series
+    // (CHNPIEATI01GYM) is discontinued at Dec 2022. Live source = AKShare macro.
+    notes: "AKShare macro_china_ppi (EastMoney) primary; CEIC fallback (id=313572201). FRED discontinued.",
   },
   cpi_yoy: {
     label: "CPI YoY %",
     unit: "%",
     category: "macro",
     fallback: "ceic",
+    akshareMacro: "cpi",
     ceic: { seriesId: 249097301, searchKeyword: "Consumer Price Index China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A01010101" },
     fred: { seriesId: "CHNCPIALLMINMEI", units: "pc1" },
-    notes: "CEIC: Consumer Price Index: YoY: Monthly: China (id=249097301).",
+    notes: "AKShare macro_china_cpi (EastMoney) primary; CEIC (id=249097301) + FRED CHNCPIALLMINMEI fallbacks.",
   },
 
   // ─── Industrial Value Added (K-Shape) ─────────────────────────────────────

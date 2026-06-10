@@ -21,6 +21,7 @@ import {
   getAkshareIndexHistorical,
   getAshareHistorical,
   getHkHistorical,
+  getAkshareMacro,
 } from "../clients/akshare";
 import { getStockConnectMonthlyAdt } from "../clients/hkex";
 import { getOecdSeries } from "../clients/oecd";
@@ -163,6 +164,37 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
         error: "data_source_pending: requires CEIC subscription",
       },
     };
+  }
+
+  // ─── Try AKShare macro FIRST for CPI/PPI (NBS-current via sidecar) ───────
+  // FRED China PPI is discontinued and CEIC can lag months behind; the sidecar
+  // pulls EastMoney/NBS data from a China-egress host so it stays current.
+  if (entry.akshareMacro) {
+    try {
+      const payload = await getAkshareMacro(entry.akshareMacro);
+      const payloadAny = payload as { source: string; data: typeof payload.data; fetchedAt: string; error?: string };
+      if (!payloadAny.error && payload.data.length > 0) {
+        const points: TimePoint[] = payload.data
+          .filter((r) => r.date && typeof r.value === "number")
+          .map((r) => ({ date: r.date, value: r.value }));
+        if (points.length > 0) {
+          return {
+            data: points,
+            provenance: {
+              source: "akshare",
+              lastUpdated: now,
+              subscribed: false,
+              cacheHit: false,
+            },
+          };
+        }
+      }
+      if (payloadAny.error) {
+        console.warn(`[fetchSeries] AKShare macro ${entry.akshareMacro} for ${logicalId}: ${payloadAny.error}`);
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] AKShare macro failed for ${logicalId}:`, err.message);
+    }
   }
 
   // ─── Try CEIC FIRST if a direct seriesId is mapped (Phase 2.5) ───────────

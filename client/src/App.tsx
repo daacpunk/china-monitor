@@ -29,6 +29,7 @@ import Brief from "@/pages/Brief";
 import Settings from "@/pages/Settings";
 import Audit from "@/pages/Audit";
 import Imports from "@/pages/Imports";
+import Costs from "@/pages/Costs";
 
 function AppRouter() {
   const [location] = useLocation();
@@ -58,6 +59,7 @@ function AppRouter() {
         <Route path="/settings" component={Settings} />
         <Route path="/audit" component={Audit} />
         <Route path="/imports" component={Imports} />
+        <Route path="/costs" component={Costs} />
         <Route component={NotFound} />
       </Switch>
       </ErrorBoundary>

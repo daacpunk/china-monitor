@@ -77,6 +77,22 @@ def cache_get_or_call(key: tuple, fn, *args, **kwargs):
     return result
 
 
+def call_with_retry(fn, *, attempts: int = 3, base_delay: float = 0.8):
+    """Call an AKShare fn with simple retry+backoff. Many EastMoney/Sina
+    endpoints intermittently return empty/HTML (-> 'Expecting value' JSON
+    parse errors); a retry usually succeeds."""
+    last_exc = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as ex:  # noqa: BLE001
+            last_exc = ex
+            log.warning("ak call attempt %d/%d failed: %s", i + 1, attempts, ex)
+            if i < attempts - 1:
+                time.sleep(base_delay * (i + 1))
+    raise last_exc
+
+
 def df_to_ohlcv(df: pd.DataFrame, date_col: str = "日期") -> List[Dict[str, Any]]:
     """Convert an AKShare OHLCV-shaped DataFrame to JSON-safe records.
 
@@ -328,7 +344,7 @@ def sector_flows(
     def fetch():
         t0 = time.time()
         # sector_type options: '行业资金流' (industry) — this is the default
-        df = ak.stock_sector_fund_flow_rank(indicator=indicator, sector_type="行业资金流")
+        df = call_with_retry(lambda: ak.stock_sector_fund_flow_rank(indicator=indicator, sector_type="行业资金流"))
         log.info("stock_sector_fund_flow_rank %s rows=%d in %.2fs",
                  indicator, 0 if df is None else len(df), time.time() - t0)
         if df is None or df.empty:
@@ -440,7 +456,7 @@ def financials_valuation(
 
     def fetch():
         t0 = time.time()
-        df = ak.stock_individual_info_em(symbol=symbol)
+        df = call_with_retry(lambda: ak.stock_individual_info_em(symbol=symbol))
         log.info("stock_individual_info_em %s rows=%d in %.2fs",
                  symbol, 0 if df is None else len(df), time.time() - t0)
         if df is None or df.empty:
@@ -491,6 +507,99 @@ def financials_valuation(
         "raw": kv,
         "fetched_at": datetime.utcnow().isoformat() + "Z",
     }
+
+
+# ─── Macro series (NBS/EastMoney via AKShare; bypasses US-IP WAF) ───────────
+def _macro_yoy_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Normalise an EastMoney cjsj macro DataFrame (cols 月份 / 当月 / 同比增长 ...)
+    into [{date: 'YYYY-MM', value: <YoY %>}] sorted ascending.
+
+    These ak.macro_china_cpi / ak.macro_china_ppi frames use Chinese columns:
+      月份 (month, e.g. '2025年05月份'), 全国-同比增长 / 同比增长 (YoY %), etc.
+    We pick the first column that looks like a national YoY figure.
+    """
+    if df is None or df.empty:
+        return []
+    df = df.copy()
+    cols = list(df.columns)
+    # Month column is usually the first one (月份).
+    month_col = cols[0]
+    # Prefer an explicit national YoY column; fall back to any 同比 column.
+    yoy_candidates = [c for c in cols if ("同比" in str(c))]
+    nat_yoy = [c for c in yoy_candidates if "全国" in str(c)]
+    value_col = (nat_yoy or yoy_candidates or [cols[1] if len(cols) > 1 else cols[0]])[0]
+
+    def parse_month(raw: Any) -> Optional[str]:
+        s = str(raw)
+        # Forms: '2025年05月份', '2025-05-01', '2025.05', '202505'
+        import re
+        m = re.search(r"(\d{4})\D*(\d{1,2})", s)
+        if not m:
+            return None
+        y, mo = m.group(1), m.group(2).zfill(2)
+        return f"{y}-{mo}"
+
+    out: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        d = parse_month(row[month_col])
+        if not d:
+            continue
+        try:
+            v = float(row[value_col])
+        except (TypeError, ValueError):
+            continue
+        out.append({"date": d, "value": v})
+    # De-dupe by date (keep last) and sort ascending.
+    seen: Dict[str, Dict[str, Any]] = {}
+    for r in out:
+        seen[r["date"]] = r
+    return sorted(seen.values(), key=lambda r: r["date"])
+
+
+@app.get("/macro/cpi")
+def macro_cpi(
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """China CPI YoY % (monthly) via ak.macro_china_cpi (EastMoney cjsj)."""
+    require_auth(x_akshare_token)
+    key = ("macro_cpi",)
+
+    def fetch():
+        t0 = time.time()
+        df = ak.macro_china_cpi()
+        log.info("macro_china_cpi rows=%d in %.2fs", 0 if df is None else len(df), time.time() - t0)
+        return _macro_yoy_records(df)
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("macro_cpi failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+    return {"source": "akshare", "endpoint": "macro_china_cpi", "count": len(rows),
+            "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
+
+
+@app.get("/macro/ppi")
+def macro_ppi(
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """China PPI YoY % (monthly) via ak.macro_china_ppi (EastMoney cjsj)."""
+    require_auth(x_akshare_token)
+    key = ("macro_ppi",)
+
+    def fetch():
+        t0 = time.time()
+        df = ak.macro_china_ppi()
+        log.info("macro_china_ppi rows=%d in %.2fs", 0 if df is None else len(df), time.time() - t0)
+        return _macro_yoy_records(df)
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("macro_ppi failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+    return {"source": "akshare", "endpoint": "macro_china_ppi", "count": len(rows),
+            "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
 
 
 @app.exception_handler(HTTPException)
