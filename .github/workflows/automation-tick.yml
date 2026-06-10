@@ -1,0 +1,45 @@
+name: Automation tick
+
+# Pings the production tick endpoint so scheduled monthly/quarterly strategy
+# reports fire even if the Railway container has slept/restarted (which clears
+# the in-process 15-min loop). The endpoint is idempotent: it only runs a report
+# when one is actually due, and a runningAt lock prevents double-runs.
+#
+# Requires repo secret AUTOMATION_TICK_TOKEN to match the same env var on Railway.
+
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly, on the hour (UTC)
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+# Avoid overlapping ticks if a previous run is slow.
+concurrency:
+  group: automation-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping tick endpoint
+        env:
+          TICK_TOKEN: ${{ secrets.AUTOMATION_TICK_TOKEN }}
+          BASE_URL: https://china-monitor-production.up.railway.app
+        run: |
+          if [ -z "$TICK_TOKEN" ]; then
+            echo "::error::AUTOMATION_TICK_TOKEN secret is not set"
+            exit 1
+          fi
+          echo "Calling $BASE_URL/api/jobs/tick"
+          RESP=$(curl -sS --max-time 300 -w "\n%{http_code}" \
+            -X POST "$BASE_URL/api/jobs/tick" \
+            -H "X-Tick-Token: $TICK_TOKEN")
+          BODY=$(echo "$RESP" | head -n -1)
+          CODE=$(echo "$RESP" | tail -n 1)
+          echo "HTTP $CODE"
+          echo "Response: $BODY"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Tick endpoint returned HTTP $CODE"
+            exit 1
+          fi
