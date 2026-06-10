@@ -241,6 +241,34 @@ This is non-negotiable per the project brief: **no stale training data may surfa
     `X-Tick-Token`) for an external Railway cron or GitHub Action trigger. A
     `runningAt` lock + `nextRunAt` advance prevent double-runs.
 
+### Maintenance fixes (2026-06)
+- **Costs page** (`/costs`) now exists (route + page were missing): API spend by
+  service/context, budget ceilings, recent-calls log — all from `/api/audit/*`.
+- **CPI / PPI freshness**: FRED's China PPI series is discontinued (stops 2022) and
+  CEIC lagged; both now pull **AKShare macro** first (`/macro/{cpi,ppi}` on the
+  sidecar → EastMoney `cjsj`, not US-IP-blocked). Verified current to the latest
+  NBS print.
+- **Refresh UX**: `?force=true` on `/api/series/:id`, a reusable Refresh button +
+  `useRefreshSeries()`, and provenance chips that now say **"NBS unavailable from
+  host — using fallback"** instead of showing blank data.
+- **Overview** rebuilt into an investor glance-view (macro pulse, equity snapshot,
+  house view, policy headlines, latest note, calendar); removed the dev phase
+  roadmap footer.
+- **Automation Run-now** now links to the generated note on `/report`. Report
+  export menu clarified to show it produces **PowerPoint deck · PDF · Word**.
+
+### Known limitations
+- **A-share valuation (PE/PB/mkt cap)** via the AKShare sidecar is currently
+  unreliable: EastMoney push2 quote endpoints (`stock_individual_info_em`,
+  `stock_zh_a_spot_em`) and the Legulegu indicator endpoint all return empty from
+  Railway's egress IP, while the `cjsj` macro and `push2his` kline paths work.
+  The endpoint degrades gracefully (returns nulls, no 502) but won't populate
+  until the sidecar runs from a China-region host or a paid valuation source is
+  wired in. Macro CPI/PPI and index OHLCV are unaffected.
+- **PMI / M2 / retail / exports** Overview cards may show "—" where their NBS/CEIC
+  source is unavailable from the host; CPI/PPI are fixed via AKShare macro and the
+  same pattern can be extended to these series.
+
 ### Next
 - **Phase 6** — TBD.
 
@@ -263,6 +291,11 @@ Settings page. Persona lenses/red-team need `ANTHROPIC_API_KEY` (or DeepSeek).
 Click "Scan" on `/policy` to pull the latest items.
 
 **Local PGlite data file is huge / corrupted** — safe to delete `./data.pgdata`; bootstrap recreates schema + defaults on next start.
+
+**Equity valuation shows blank PE/PB/mkt cap** — the AKShare EastMoney/Legulegu
+quote endpoints are blocked from the sidecar's egress IP (see Known limitations).
+CPI/PPI macro and index OHLCV still work. Results are cached 24h, so after a
+sidecar redeploy a previously-cached empty result clears on process restart.
 
 ---
 
