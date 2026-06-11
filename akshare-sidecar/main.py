@@ -768,9 +768,12 @@ def macro_retail(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-
     def build(df):
         if df is None or df.empty:
             return []
+        # Exact monthly YoY column is '同比增长'; the cumulative one is
+        # '累计-同比增长'. Use exact-name match first, then substring fallback.
+        if "同比增长" in df.columns:
+            return _macro_records_for_column(df, ["同比增长"], month_col="月份")
         cols = [c for c in df.columns if "同比" in str(c) and "累计" not in str(c)]
-        target = cols or ["同比增长"]
-        return _macro_records_for_column(df, [str(target[0])])
+        return _macro_records_for_column(df, [str(c) for c in cols]) if cols else []
 
     return _macro_endpoint("macro_retail", "macro_china_consumer_goods_retail", build)
 
@@ -801,9 +804,10 @@ def macro_debug(
         raise HTTPException(status_code=502, detail=f"{fn} error: {ex}")
     if df is None or df.empty:
         return {"fn": fn, "empty": True, "columns": []}
+    head = df.head(2).astype(str).to_dict(orient="records")
     tail = df.tail(2).astype(str).to_dict(orient="records")
     return {"fn": fn, "empty": False, "rows": len(df),
-            "columns": [str(c) for c in df.columns], "tail": tail}
+            "columns": [str(c) for c in df.columns], "head": head, "tail": tail}
 
 
 @app.exception_handler(HTTPException)
