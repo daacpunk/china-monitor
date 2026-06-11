@@ -67,13 +67,20 @@ def require_auth(x_akshare_token: Optional[str]) -> None:
 
 
 def cache_get_or_call(key: tuple, fn, *args, **kwargs):
-    """24h TTL cache wrapper. Stores result on success."""
+    """24h TTL cache wrapper. Stores result on success.
+
+    Empty results (None / empty list / empty dict) are NOT cached so a transient
+    upstream failure doesn't poison the entry for the full 24h TTL."""
     if key in cache:
         log.info("cache HIT %s", key[:2])
         return cache[key]
     log.info("cache MISS %s", key[:2])
     result = fn(*args, **kwargs)
-    cache[key] = result
+    is_empty = result is None or (hasattr(result, "__len__") and len(result) == 0)
+    if not is_empty:
+        cache[key] = result
+    else:
+        log.warning("not caching empty result for %s", key[:2])
     return result
 
 
