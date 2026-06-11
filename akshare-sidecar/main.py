@@ -847,8 +847,10 @@ def _trade_balance_records(df):
             continue
         if not (math.isfinite(exp) and math.isfinite(imp)):
             continue
-        # 亿美元 -> USD bn: 1 亿 USD = 0.1 bn.
-        bal_bn = (exp - imp) / 10.0
+        # macro_china_hgjck amounts are in 万美元 (10k USD), despite the doc's
+        # '亿美元' label. 1 万 USD = 1e-5 bn, so divide the 万美元 difference by 1e5.
+        # (Sanity: May-2026 ≈ 1.05e7 万美元 → $105bn surplus, matching customs.)
+        bal_bn = (exp - imp) / 100000.0
         seen[d] = {"date": d, "value": round(bal_bn, 2)}
     return sorted(seen.values(), key=lambda r: r["date"])
 
