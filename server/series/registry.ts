@@ -146,7 +146,15 @@ export interface SeriesEntry {
   akshare?: AkshareConfig;
   /** AKShare macro series (CPI/PPI YoY) via sidecar /macro/* — tried FIRST and
    *  used when it is fresher than CEIC/FRED (NBS-current, not US-IP-blocked). */
-  akshareMacro?: "cpi" | "ppi" | "pmi" | "m2" | "retail" | "exports";
+  akshareMacro?:
+    | "cpi"
+    | "ppi"
+    | "pmi"
+    | "m2"
+    | "retail"
+    | "exports"
+    | "imports"
+    | "trade_balance";
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -313,18 +321,20 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "trade",
     fallback: "ceic",
+    akshareMacro: "imports",
     ceic: { seriesId: 423075917, searchKeyword: "Total Imports YoY China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A060E0201" },
-    notes: "CEIC: Total Imports: YoY: Monthly: sa: China (id=423075917).",
+    notes: "AKShare macro_china_hgjck (当月进口额-同比增长) primary; CEIC id=423075917 fallback.",
   },
   trade_balance_usd: {
     label: "Trade Balance USD bn",
     unit: "USD bn",
     category: "trade",
     fallback: "ceic",
+    akshareMacro: "trade_balance",
     ceic: { seriesId: 458962047, searchKeyword: "Trade Balance China", country: "CN", transform: "divide_1000" },
     nbs: { dbcode: "hgyd", code: "A060E0301" },
-    notes: "CEIC: Trade Balance: USD mn: Monthly: sa: China (id=458962047). Divided by 1000 for bn.",
+    notes: "AKShare macro_china_hgjck (出口-进口 金额) primary; CEIC id=458962047 fallback.",
   },
 
   // ─── Equity Indices ───────────────────────────────────────────────────────

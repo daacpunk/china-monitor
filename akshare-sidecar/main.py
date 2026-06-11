@@ -802,6 +802,65 @@ def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare
     )
 
 
+@app.get("/macro/imports")
+def macro_imports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China imports YoY % (USD) via ak.macro_china_hgjck (Customs, EastMoney cjsj).
+    Targets the monthly '当月进口额-同比增长' column."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint(
+        "macro_imports", "macro_china_hgjck",
+        lambda df: _macro_records_for_column(
+            df, ["当月进口额-同比增长", "当月进口额-同比"], month_col="月份"),
+    )
+
+
+def _trade_balance_records(df):
+    """Monthly trade balance in USD bn = (当月出口额-金额) - (当月进口额-金额).
+    macro_china_hgjck amounts are in 亿美元 (100M USD) -> /10 to get USD bn."""
+    if df is None or df.empty:
+        return []
+    cols = list(df.columns)
+
+    def find(*subs):
+        for s in subs:
+            for c in cols:
+                if s in str(c):
+                    return c
+        return None
+
+    month_col = find("月份") or cols[0]
+    exp_col = find("当月出口额-金额", "当月出口额")
+    imp_col = find("当月进口额-金额", "当月进口额")
+    if exp_col is None or imp_col is None:
+        return []
+    import re, math
+    seen = {}
+    for _, row in df.iterrows():
+        m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[month_col]))
+        if not m:
+            continue
+        d = m.group(1) + "-" + m.group(2).zfill(2)
+        try:
+            exp = float(row[exp_col])
+            imp = float(row[imp_col])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(exp) and math.isfinite(imp)):
+            continue
+        # 亿美元 -> USD bn: 1 亿 USD = 0.1 bn.
+        bal_bn = (exp - imp) / 10.0
+        seen[d] = {"date": d, "value": round(bal_bn, 2)}
+    return sorted(seen.values(), key=lambda r: r["date"])
+
+
+@app.get("/macro/trade_balance")
+def macro_trade_balance(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China monthly trade balance in USD bn, derived from ak.macro_china_hgjck
+    (当月出口额-金额 minus 当月进口额-金额)."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint("macro_trade_balance", "macro_china_hgjck", _trade_balance_records)
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

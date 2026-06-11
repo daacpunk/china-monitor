@@ -146,6 +146,9 @@ const OVERVIEW_ANOMALY_IDS = [
   "iva_yoy",
   "exports_yoy",
   "imports_yoy",
+  "trade_balance_usd",
+  "retail_sales_yoy",
+  "pmi_mfg",
   "new_home_prices_70city",
   "usdcny_monthly",
   "m2_yoy",
@@ -170,6 +173,10 @@ export default function Overview() {
     "ppi_yoy",
     "pmi_mfg",
     "m2_yoy",
+    "retail_sales_yoy",
+    "exports_yoy",
+    "imports_yoy",
+    "trade_balance_usd",
     "csi300_monthly",
     "chinext_monthly",
     "hangseng_monthly",
@@ -341,10 +348,41 @@ export default function Overview() {
           anomalyRow={anomalyById["retail_sales_yoy"]}
         />
         <LiveStatCard
+          label="Unemployment"
+          logicalId="unemployment_rate"
+          hint="Urban surveyed unemployment"
+          invertTone={true}
+          anomalyRow={anomalyById["unemployment_rate"]}
+        />
+      </div>
+
+      {/* ── Trade ─────────────────────────────────────────────────────────── */}
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Trade</h2>
+        <span className="text-xs text-muted-foreground">Customs (USD terms)</span>
+      </div>
+      <div
+        className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6"
+        data-testid="card-trade"
+      >
+        <LiveStatCard
           label="Exports YoY"
           logicalId="exports_yoy"
-          hint="Merchandise export growth"
+          hint="Merchandise exports (USD)"
           anomalyRow={anomalyById["exports_yoy"]}
+        />
+        <LiveStatCard
+          label="Imports YoY"
+          logicalId="imports_yoy"
+          hint="Merchandise imports (USD)"
+          anomalyRow={anomalyById["imports_yoy"]}
+        />
+        <LiveStatCard
+          label="Trade Balance"
+          logicalId="trade_balance_usd"
+          suffix=" bn"
+          hint="Monthly surplus (USD bn)"
+          anomalyRow={anomalyById["trade_balance_usd"]}
         />
       </div>
 

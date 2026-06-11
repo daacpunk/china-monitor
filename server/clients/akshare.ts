@@ -196,7 +196,9 @@ export type AkshareMacroSeries =
   | "pmi"
   | "m2"
   | "retail"
-  | "exports";
+  | "exports"
+  | "imports"
+  | "trade_balance";
 
 export async function getAkshareMacro(
   series: AkshareMacroSeries,
