@@ -769,6 +769,27 @@ def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare
     return _macro_endpoint("macro_exports", "macro_china_exports_yoy", _macro_index_value_records)
 
 
+@app.get("/macro/_debug")
+def macro_debug(
+    fn: str,
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Debug: return the columns + last row of an ak.macro_china_* function so we
+    can map column names exactly. Allowlisted to macro_china_* fns only."""
+    require_auth(x_akshare_token)
+    if not fn.startswith("macro_china_") or not hasattr(ak, fn):
+        raise HTTPException(status_code=400, detail="fn must be an existing macro_china_* function")
+    try:
+        df = call_with_retry(lambda: getattr(ak, fn)(), attempts=2)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail=f"{fn} error: {ex}")
+    if df is None or df.empty:
+        return {"fn": fn, "empty": True, "columns": []}
+    tail = df.tail(2).astype(str).to_dict(orient="records")
+    return {"fn": fn, "empty": False, "rows": len(df),
+            "columns": [str(c) for c in df.columns], "tail": tail}
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

@@ -504,6 +504,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // mirror that here for browser caching on most endpoints.
   const akCache = "public, max-age=86400"; // 24h
 
+  /** GET /api/akshare/macro-debug?fn=macro_china_money_supply — TEMP column probe */
+  app.get("/api/akshare/macro-debug", async (req, res) => {
+    try {
+      const { getAkshareMacroDebug } = await import("./clients/akshare");
+      const result = await getAkshareMacroDebug(String(req.query.fn || ""));
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {
