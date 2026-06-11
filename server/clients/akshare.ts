@@ -190,8 +190,16 @@ export interface AkshareMacroPoint {
 /** China macro YoY series (CPI/PPI) via the sidecar /macro/* endpoints.
  *  These pull from EastMoney/NBS via AKShare on the sidecar host, which is not
  *  subject to the US-egress WAF block, so they stay current when FRED/CEIC lag. */
+export type AkshareMacroSeries =
+  | "cpi"
+  | "ppi"
+  | "pmi"
+  | "m2"
+  | "retail"
+  | "exports";
+
 export async function getAkshareMacro(
-  series: "cpi" | "ppi",
+  series: AkshareMacroSeries,
 ): Promise<AkshareResponse<AkshareMacroPoint>> {
   try {
     const r = await getJson<{ data: AkshareMacroPoint[] }>(`/macro/${series}`);

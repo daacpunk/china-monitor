@@ -650,6 +650,125 @@ def macro_ppi(
             "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
 
 
+def _macro_records_for_column(df, value_substrings, month_col=None):
+    """Generic monthly-macro normaliser targeting a SPECIFIC column by substring
+    (priority order). Used for PMI (level), M2 (YoY), retail (YoY).
+    Returns [{date:'YYYY-MM', value:float}] ascending."""
+    if df is None or df.empty:
+        return []
+    cols = list(df.columns)
+    mcol = month_col if (month_col and month_col in cols) else cols[0]
+    value_col = None
+    for sub in value_substrings:
+        for c in cols:
+            if sub in str(c):
+                value_col = c
+                break
+        if value_col:
+            break
+    if value_col is None:
+        return []
+    import re
+    seen = {}
+    for _, row in df.iterrows():
+        m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[mcol]))
+        if not m:
+            continue
+        d = m.group(1) + "-" + m.group(2).zfill(2)
+        try:
+            v = float(row[value_col])
+        except (TypeError, ValueError):
+            continue
+        seen[d] = {"date": d, "value": v}
+    return sorted(seen.values(), key=lambda r: r["date"])
+
+
+def _macro_index_value_records(df):
+    """For jin10-style frames with `index` (release date) + `value` column
+    (e.g. macro_china_exports_yoy). Keeps the release-month as the date."""
+    if df is None or df.empty:
+        return []
+    df = df.reset_index()
+    cols = list(df.columns)
+    date_col = cols[0]
+    val_col = "value" if "value" in cols else (cols[1] if len(cols) > 1 else cols[0])
+    import re
+    seen = {}
+    for _, row in df.iterrows():
+        m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[date_col]))
+        if not m:
+            continue
+        d = m.group(1) + "-" + m.group(2).zfill(2)
+        try:
+            v = float(row[val_col])
+        except (TypeError, ValueError):
+            continue
+        seen[d] = {"date": d, "value": v}
+    return sorted(seen.values(), key=lambda r: r["date"])
+
+
+def _macro_endpoint(key_name, ak_fn_name, builder):
+    """Shared wrapper: cached + retry + 502 on failure."""
+    key = (key_name,)
+
+    def fetch():
+        t0 = time.time()
+        fn = getattr(ak, ak_fn_name)
+        df = call_with_retry(lambda: fn(), attempts=2)
+        log.info("%s rows=%d in %.2fs", ak_fn_name, 0 if df is None else len(df), time.time() - t0)
+        return builder(df)
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("%s failed", key_name)
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+    return {"source": "akshare", "endpoint": ak_fn_name, "count": len(rows),
+            "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
+
+
+@app.get("/macro/pmi")
+def macro_pmi(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China official Manufacturing PMI (level) via ak.macro_china_pmi."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint(
+        "macro_pmi", "macro_china_pmi",
+        lambda df: _macro_records_for_column(df, ["制造业-指数", "制造业指数", "制造业"]),
+    )
+
+
+@app.get("/macro/m2")
+def macro_m2(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China M2 YoY % via ak.macro_china_money_supply."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint(
+        "macro_m2", "macro_china_money_supply",
+        lambda df: _macro_records_for_column(df, ["M2)同比增长", "M2)同比", "M2"]),
+    )
+
+
+@app.get("/macro/retail")
+def macro_retail(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China retail sales monthly YoY % via ak.macro_china_consumer_goods_retail."""
+    require_auth(x_akshare_token)
+
+    def build(df):
+        if df is None or df.empty:
+            return []
+        cols = [c for c in df.columns if "同比" in str(c) and "累计" not in str(c)]
+        target = cols or ["同比增长"]
+        return _macro_records_for_column(df, [str(target[0])])
+
+    return _macro_endpoint("macro_retail", "macro_china_consumer_goods_retail", build)
+
+
+@app.get("/macro/exports")
+def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China exports YoY % (USD) via ak.macro_china_exports_yoy."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint("macro_exports", "macro_china_exports_yoy", _macro_index_value_records)
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

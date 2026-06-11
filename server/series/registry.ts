@@ -146,7 +146,7 @@ export interface SeriesEntry {
   akshare?: AkshareConfig;
   /** AKShare macro series (CPI/PPI YoY) via sidecar /macro/* — tried FIRST and
    *  used when it is fresher than CEIC/FRED (NBS-current, not US-IP-blocked). */
-  akshareMacro?: "cpi" | "ppi";
+  akshareMacro?: "cpi" | "ppi" | "pmi" | "m2" | "retail" | "exports";
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -265,8 +265,10 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "macro",
     fallback: "nbs",
+    akshareMacro: "retail",
     nbs: { dbcode: "hgyd", code: "A06010101" },
     ceic: { searchKeyword: "Total Retail Sales of Consumer Goods", country: "CN" },
+    notes: "AKShare macro_china_consumer_goods_retail (monthly YoY) primary; NBS/CEIC fallback.",
   },
 
   // ─── PMI ──────────────────────────────────────────────────────────────────
@@ -275,6 +277,7 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "index",
     category: "macro",
     fallback: "nbs",
+    akshareMacro: "pmi",
     nbs: { dbcode: "hgyd", code: "A01160101" },
     // FRED: CHNMFGPMI = Caixin Manufacturing PMI for China (monthly)
     // Note: Caixin PMI (private sector) vs NBS PMI (all firms) — directionally aligned
@@ -300,9 +303,10 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "trade",
     fallback: "ceic",
+    akshareMacro: "exports",
     ceic: { seriesId: 423075907, searchKeyword: "Total Exports YoY China", country: "CN" },
     nbs: { dbcode: "hgyd", code: "A060E0101" },
-    notes: "CEIC: Total Exports: YoY: Monthly: sa: China (id=423075907).",
+    notes: "AKShare macro_china_exports_yoy (USD YoY) primary; CEIC id=423075907 fallback.",
   },
   imports_yoy: {
     label: "Imports YoY %",
@@ -543,8 +547,9 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "macro",
     fallback: "ceic",
+    akshareMacro: "m2",
     ceic: { seriesId: 414245047, searchKeyword: "M2 YoY China", country: "CN" },
-    notes: "CEIC: M2: YoY: Monthly: sa: China (id=414245047).",
+    notes: "AKShare macro_china_money_supply (M2 YoY) primary; CEIC id=414245047 fallback.",
   },
 
   // Labor
