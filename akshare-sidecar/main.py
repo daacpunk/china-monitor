@@ -825,9 +825,16 @@ def macro_debug(
             built[name] = {"n": len(recs), "last": recs[-1] if recs else None}
         except Exception as ex:
             built[name] = {"error": str(ex)}
+    # Also invoke the real /macro/retail route handler to see its actual output.
+    route_out = None
+    try:
+        route_out = macro_retail(x_akshare_token=x_akshare_token)
+        route_out = {"count": route_out.get("count"), "last": (route_out.get("data") or [None])[-1]}
+    except Exception as ex:
+        route_out = {"error": str(ex)}
     return {"fn": fn, "empty": False, "rows": len(df),
             "columns": [str(c) for c in df.columns], "head": head, "tail": tail,
-            "built": built}
+            "built": built, "route_retail": route_out}
 
 
 @app.exception_handler(HTTPException)
