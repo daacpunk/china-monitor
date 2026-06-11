@@ -75,10 +75,21 @@ cd china-monitor/akshare-sidecar
 ```
 (Or `scp` just the `akshare-sidecar/` folder up — it's self-contained.)
 
-### 4. Build and run
+### 4. Build and run (one command via docker-compose)
+```bash
+cp .env.example .env
+nano .env                 # set AKSHARE_TOKEN=<YOUR_SHARED_SECRET>
+docker compose up -d --build
+```
+That's it. The container auto-restarts on reboot/crash and has a built-in
+`/health` healthcheck. Check status with `docker compose ps` and logs with
+`docker compose logs -f`.
+
+<details>
+<summary>Alternative: plain <code>docker run</code> (no compose)</summary>
+
 ```bash
 docker build -t akshare-sidecar .
-
 docker run -d --name akshare-sidecar \
   --restart unless-stopped \
   -p 8000:8000 \
@@ -86,6 +97,7 @@ docker run -d --name akshare-sidecar \
   -e PORT=8000 \
   akshare-sidecar
 ```
+</details>
 
 Verify locally on the box:
 ```bash

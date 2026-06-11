@@ -1,0 +1,32 @@
+# One-command setup for the AKShare sidecar on a VPS (Hong Kong / mainland CN).
+#
+#   1. cp .env.example .env   &&   edit .env to set AKSHARE_TOKEN
+#   2. docker compose up -d --build
+#
+# Then point the main app's AKSHARE_SIDECAR_URL at this host (see
+# HOSTING_CHINA_REGION.md). Container auto-restarts on reboot/crash.
+
+services:
+  akshare-sidecar:
+    build: .
+    image: akshare-sidecar
+    container_name: akshare-sidecar
+    restart: unless-stopped
+    ports:
+      # host:container — change the host port if 8000 is taken.
+      - "${HOST_PORT:-8000}:8000"
+    environment:
+      # Shared secret the main app sends as X-AKShare-Token. REQUIRED.
+      AKSHARE_TOKEN: "${AKSHARE_TOKEN:?set AKSHARE_TOKEN in .env}"
+      # Port the app binds inside the container (keep 8000 to match the image).
+      PORT: "8000"
+      # Optional cache tuning (defaults: 24h TTL, 500 entries).
+      AKSHARE_CACHE_TTL: "${AKSHARE_CACHE_TTL:-86400}"
+      AKSHARE_CACHE_MAX: "${AKSHARE_CACHE_MAX:-500}"
+    healthcheck:
+      # /health needs no auth — confirms the app is up.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
