@@ -683,16 +683,26 @@ def _macro_records_for_column(df, value_substrings, month_col=None):
     return sorted(seen.values(), key=lambda r: r["date"])
 
 
-def _macro_index_value_records(df):
-    """For jin10-style frames with `index` (release date) + `value` column
-    (e.g. macro_china_exports_yoy). Keeps the release-month as the date."""
+def _macro_release_records(df, date_substrings, value_substrings):
+    """For jin10 'report' frames (e.g. macro_china_exports_yoy) with columns
+    like 商品/日期/今值/预测值/前值. Maps 日期 (release date) → month and
+    uses 今值 (actual) as the value. Skips NaN actuals (unreleased rows)."""
     if df is None or df.empty:
         return []
-    df = df.reset_index()
     cols = list(df.columns)
-    date_col = cols[0]
-    val_col = "value" if "value" in cols else (cols[1] if len(cols) > 1 else cols[0])
-    import re
+
+    def pick(subs):
+        for s in subs:
+            for c in cols:
+                if s in str(c):
+                    return c
+        return None
+
+    date_col = pick(date_substrings) or cols[0]
+    val_col = pick(value_substrings)
+    if val_col is None:
+        return []
+    import re, math
     seen = {}
     for _, row in df.iterrows():
         m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[date_col]))
@@ -702,6 +712,8 @@ def _macro_index_value_records(df):
         try:
             v = float(row[val_col])
         except (TypeError, ValueError):
+            continue
+        if math.isnan(v):
             continue
         seen[d] = {"date": d, "value": v}
     return sorted(seen.values(), key=lambda r: r["date"])
@@ -743,7 +755,8 @@ def macro_m2(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Toke
     require_auth(x_akshare_token)
     return _macro_endpoint(
         "macro_m2", "macro_china_money_supply",
-        lambda df: _macro_records_for_column(df, ["M2)同比增长", "M2)同比", "M2"]),
+        # Column is '货币和准货币(M2)-同比增长'. Avoid the '-数量' level column.
+        lambda df: _macro_records_for_column(df, ["M2)-同比增长", "(M2)-同比增长"]),
     )
 
 
@@ -766,7 +779,10 @@ def macro_retail(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-
 def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
     """China exports YoY % (USD) via ak.macro_china_exports_yoy."""
     require_auth(x_akshare_token)
-    return _macro_endpoint("macro_exports", "macro_china_exports_yoy", _macro_index_value_records)
+    return _macro_endpoint(
+        "macro_exports", "macro_china_exports_yoy",
+        lambda df: _macro_release_records(df, ["日期", "date"], ["今值", "value"]),
+    )
 
 
 @app.get("/macro/_debug")
