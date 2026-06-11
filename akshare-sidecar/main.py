@@ -791,11 +791,14 @@ def macro_retail(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-
 
 @app.get("/macro/exports")
 def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
-    """China exports YoY % (USD) via ak.macro_china_exports_yoy."""
+    """China exports YoY % (USD) via ak.macro_china_hgjck (Customs, EastMoney cjsj).
+    Targets the monthly '当月出口额-同比增长' column — this is current to the latest
+    customs release, unlike the sparse jin10 macro_china_exports_yoy calendar."""
     require_auth(x_akshare_token)
     return _macro_endpoint(
-        "macro_exports", "macro_china_exports_yoy",
-        lambda df: _macro_release_records(df, ["日期", "date"], ["今值", "value"]),
+        "macro_exports", "macro_china_hgjck",
+        lambda df: _macro_records_for_column(
+            df, ["当月出口额-同比增长", "当月出口额-同比"], month_col="月份"),
     )
 
 
