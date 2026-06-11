@@ -202,16 +202,14 @@ export async function getAkshareMacro(
   series: AkshareMacroSeries,
 ): Promise<AkshareResponse<AkshareMacroPoint>> {
   try {
-    const r = await getJson<{ data: AkshareMacroPoint[] }>(`/macro/${series}`);
+    // Macro datasets are large and the first (uncached) sidecar fetch can be
+    // slow; allow up to 60s before giving up so we don't fall through to the
+    // (often unavailable) NBS/CEIC fallbacks on a cold cache.
+    const r = await getJson<{ data: AkshareMacroPoint[] }>(`/macro/${series}`, 60_000);
     return { source: "akshare", data: r.data ?? [], fetchedAt: FETCHED_AT() };
   } catch (err: any) {
     return { source: "akshare", data: [], fetchedAt: FETCHED_AT(), error: err.message };
   }
-}
-
-/** Debug: inspect raw columns of a macro_china_* function (temporary). */
-export async function getAkshareMacroDebug(fn: string): Promise<any> {
-  return getJson<any>(`/macro/_debug?fn=${encodeURIComponent(fn)}`);
 }
 
 /** Health check — useful for debug routes / startup probe. */

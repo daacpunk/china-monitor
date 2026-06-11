@@ -795,48 +795,6 @@ def macro_exports(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare
     )
 
 
-@app.get("/macro/_debug")
-def macro_debug(
-    fn: str,
-    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
-) -> Dict[str, Any]:
-    """Debug: return the columns + last row of an ak.macro_china_* function so we
-    can map column names exactly. Allowlisted to macro_china_* fns only."""
-    require_auth(x_akshare_token)
-    if not fn.startswith("macro_china_") or not hasattr(ak, fn):
-        raise HTTPException(status_code=400, detail="fn must be an existing macro_china_* function")
-    try:
-        df = call_with_retry(lambda: getattr(ak, fn)(), attempts=2)
-    except Exception as ex:
-        raise HTTPException(status_code=502, detail=f"{fn} error: {ex}")
-    if df is None or df.empty:
-        return {"fn": fn, "empty": True, "columns": []}
-    head = df.head(2).astype(str).to_dict(orient="records")
-    tail = df.tail(2).astype(str).to_dict(orient="records")
-    # Also run the builders so we can see how many records each yields.
-    builders = {
-        "retail": lambda: _macro_records_for_column(df, ["同比增长"], month_col="月份"),
-        "m2": lambda: _macro_records_for_column(df, ["M2)-同比增长"]),
-    }
-    built = {}
-    for name, b in builders.items():
-        try:
-            recs = b()
-            built[name] = {"n": len(recs), "last": recs[-1] if recs else None}
-        except Exception as ex:
-            built[name] = {"error": str(ex)}
-    # Also invoke the real /macro/retail route handler to see its actual output.
-    route_out = None
-    try:
-        route_out = macro_retail(x_akshare_token=x_akshare_token)
-        route_out = {"count": route_out.get("count"), "last": (route_out.get("data") or [None])[-1]}
-    except Exception as ex:
-        route_out = {"error": str(ex)}
-    return {"fn": fn, "empty": False, "rows": len(df),
-            "columns": [str(c) for c in df.columns], "head": head, "tail": tail,
-            "built": built, "route_retail": route_out}
-
-
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(
