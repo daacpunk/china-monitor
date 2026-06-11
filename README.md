@@ -244,10 +244,13 @@ This is non-negotiable per the project brief: **no stale training data may surfa
 ### Maintenance fixes (2026-06)
 - **Costs page** (`/costs`) now exists (route + page were missing): API spend by
   service/context, budget ceilings, recent-calls log — all from `/api/audit/*`.
-- **CPI / PPI freshness**: FRED's China PPI series is discontinued (stops 2022) and
-  CEIC lagged; both now pull **AKShare macro** first (`/macro/{cpi,ppi}` on the
-  sidecar → EastMoney `cjsj`, not US-IP-blocked). Verified current to the latest
-  NBS print.
+- **Macro freshness via AKShare**: FRED's China PPI series is discontinued (stops
+  2022) and CEIC lagged. Six macro series now pull **AKShare macro** first
+  (sidecar `/macro/{cpi,ppi,pmi,m2,retail,exports}` → EastMoney/jin10, not
+  US-IP-blocked): CPI, PPI, manufacturing PMI, M2 YoY, retail-sales YoY, and
+  exports YoY. Verified against the latest NBS/PBoC prints. (Sidecar caches 24h,
+  never caches empty results, and skips NaN values that would otherwise corrupt
+  the JSON and zero out a series.)
 - **Refresh UX**: `?force=true` on `/api/series/:id`, a reusable Refresh button +
   `useRefreshSeries()`, and provenance chips that now say **"NBS unavailable from
   host — using fallback"** instead of showing blank data.
@@ -265,9 +268,10 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   The endpoint degrades gracefully (returns nulls, no 502) but won't populate
   until the sidecar runs from a China-region host or a paid valuation source is
   wired in. Macro CPI/PPI and index OHLCV are unaffected.
-- **PMI / M2 / retail / exports** Overview cards may show "—" where their NBS/CEIC
-  source is unavailable from the host; CPI/PPI are fixed via AKShare macro and the
-  same pattern can be extended to these series.
+- **Exports YoY** comes from AKShare's jin10 calendar series, which can lag a few
+  months behind the latest customs release; CEIC (if subscribed) is fresher.
+- Other NBS-sourced series not yet on the AKShare-macro path may still show "—"
+  from the host; the same `akshareMacro` pattern can be extended to them.
 
 ### Next
 - **Phase 6** — TBD.
