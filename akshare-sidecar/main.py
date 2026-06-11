@@ -806,8 +806,21 @@ def macro_debug(
         return {"fn": fn, "empty": True, "columns": []}
     head = df.head(2).astype(str).to_dict(orient="records")
     tail = df.tail(2).astype(str).to_dict(orient="records")
+    # Also run the builders so we can see how many records each yields.
+    builders = {
+        "retail": lambda: _macro_records_for_column(df, ["同比增长"], month_col="月份"),
+        "m2": lambda: _macro_records_for_column(df, ["M2)-同比增长"]),
+    }
+    built = {}
+    for name, b in builders.items():
+        try:
+            recs = b()
+            built[name] = {"n": len(recs), "last": recs[-1] if recs else None}
+        except Exception as ex:
+            built[name] = {"error": str(ex)}
     return {"fn": fn, "empty": False, "rows": len(df),
-            "columns": [str(c) for c in df.columns], "head": head, "tail": tail}
+            "columns": [str(c) for c in df.columns], "head": head, "tail": tail,
+            "built": built}
 
 
 @app.exception_handler(HTTPException)
