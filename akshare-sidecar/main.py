@@ -675,7 +675,7 @@ def _macro_records_for_column(df, value_substrings, month_col=None):
             break
     if value_col is None:
         return []
-    import re
+    import re, math
     seen = {}
     for _, row in df.iterrows():
         m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[mcol]))
@@ -685,6 +685,10 @@ def _macro_records_for_column(df, value_substrings, month_col=None):
         try:
             v = float(row[value_col])
         except (TypeError, ValueError):
+            continue
+        # Skip NaN/Inf — they serialise to invalid JSON (literal NaN) which breaks
+        # the Node JSON.parse on the consumer side, zeroing out the whole series.
+        if not math.isfinite(v):
             continue
         seen[d] = {"date": d, "value": v}
     return sorted(seen.values(), key=lambda r: r["date"])
