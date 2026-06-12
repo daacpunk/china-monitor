@@ -565,7 +565,7 @@ def financials_valuation(
         "pe_static": num("PE(静)", "市盈率(静)", "市盈率-静态"),
         "pb": num("市净率"),
         "ps_ttm": num("市销率", "PS(TTM)"),
-        "price": num("最新价", "最新", "最新价格"),
+        "price": num("当日收盘价", "最新价", "最新", "最新价格", "收盘价"),
         "total_shares": num("总股本"),
         "float_shares": num("流通股"),
     }
