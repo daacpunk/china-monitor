@@ -177,6 +177,7 @@ export default function Overview() {
     "exports_yoy",
     "imports_yoy",
     "trade_balance_usd",
+    "unemployment_rate",
     "csi300_monthly",
     "chinext_monthly",
     "hangseng_monthly",

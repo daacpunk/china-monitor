@@ -43,7 +43,7 @@ import {
 
 // ─── Default universe ────────────────────────────────────────────────────
 
-/** China macro drivers fed into the brief. */
+/** China macro drivers fed into the brief (and thus the report/deck macroDigest). */
 export const DEFAULT_BRIEF_DRIVERS = [
   "ppi_yoy",
   "cpi_yoy",
@@ -51,10 +51,14 @@ export const DEFAULT_BRIEF_DRIVERS = [
   "retail_sales_yoy",
   "m2_yoy",
   "usdcny_monthly",
+  // Full trade picture (customs, USD): exports + imports + the balance.
   "exports_yoy",
+  "imports_yoy",
+  "trade_balance_usd",
   "new_home_prices_70city",
   "oecd_cli_china",
   "pmi_mfg",
+  "unemployment_rate",
 ];
 
 /** Cross-asset color series. */

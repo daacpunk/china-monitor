@@ -198,7 +198,8 @@ export type AkshareMacroSeries =
   | "retail"
   | "exports"
   | "imports"
-  | "trade_balance";
+  | "trade_balance"
+  | "unemployment";
 
 export async function getAkshareMacro(
   series: AkshareMacroSeries,

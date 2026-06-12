@@ -863,6 +863,45 @@ def macro_trade_balance(x_akshare_token: Optional[str] = Header(None, alias="X-A
     return _macro_endpoint("macro_trade_balance", "macro_china_hgjck", _trade_balance_records)
 
 
+def _long_format_records(df, item_value, item_col="item", date_col="date", val_col="value"):
+    """For long-format frames (date, item, value) like
+    macro_china_urban_unemployment. Keeps only rows where item == item_value,
+    maps date (e.g. '202604') -> 'YYYY-MM'. NaN-safe."""
+    if df is None or df.empty:
+        return []
+    cols = list(df.columns)
+    if item_col not in cols or date_col not in cols or val_col not in cols:
+        return []
+    import re, math
+    seen = {}
+    for _, row in df.iterrows():
+        if str(row[item_col]).strip() != item_value:
+            continue
+        m = re.search(r"(\d{4})\D*(\d{1,2})", str(row[date_col]))
+        if not m:
+            continue
+        d = m.group(1) + "-" + m.group(2).zfill(2)
+        try:
+            v = float(row[val_col])
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(v):
+            continue
+        seen[d] = {"date": d, "value": v}
+    return sorted(seen.values(), key=lambda r: r["date"])
+
+
+@app.get("/macro/unemployment")
+def macro_unemployment(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
+    """China urban surveyed unemployment rate (%) via ak.macro_china_urban_unemployment.
+    Long-format; keep item == '全国城镇调查失业率' (the headline national rate)."""
+    require_auth(x_akshare_token)
+    return _macro_endpoint(
+        "macro_unemployment", "macro_china_urban_unemployment",
+        lambda df: _long_format_records(df, "全国城镇调查失业率"),
+    )
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

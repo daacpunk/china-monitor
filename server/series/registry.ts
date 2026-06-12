@@ -154,7 +154,8 @@ export interface SeriesEntry {
     | "retail"
     | "exports"
     | "imports"
-    | "trade_balance";
+    | "trade_balance"
+    | "unemployment";
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
   notes?: string;
@@ -568,6 +569,7 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     unit: "%",
     category: "kshape",
     fallback: "ceic",
+    akshareMacro: "unemployment",
     ceic: { seriesId: 487004207, searchKeyword: "Unemployment Rate Monthly China", country: "CN" },
     notes: "CEIC: Unemployment Rate: Monthly: China (id=487004207).",
   },
