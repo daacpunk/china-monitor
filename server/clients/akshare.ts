@@ -215,11 +215,6 @@ export async function getAkshareMacro(
   }
 }
 
-/** TEMP debug: inspect raw columns/items of a macro_china_* function. */
-export async function getAkshareMacroDebug(fn: string): Promise<any> {
-  return getJson<any>(`/macro/_debug?fn=${encodeURIComponent(fn)}`, 60_000);
-}
-
 /** Health check — useful for debug routes / startup probe. */
 export async function getAkshareHealth(): Promise<{ ok: boolean; detail: any }> {
   try {
