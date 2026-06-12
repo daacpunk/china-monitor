@@ -49,13 +49,14 @@ const SECTIONS: NavItem[] = [
   { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },
   { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
   { slug: "/brief", label: "Brief", icon: Newspaper, group: "Analysis" },
-  { slug: "/costs", label: "Costs", icon: DollarSign, group: "Analysis" },
   // ─── Report group (Phase 3) ───
   { slug: "/report", label: "Strategy Report", icon: FileText, group: "Report" },
   { slug: "/automation", label: "Automation", icon: CalendarClock, group: "Report" },
+  { slug: "/costs", label: "Costs", icon: DollarSign, group: "System" },
+  { slug: "/diagnostics", label: "Diagnostics", icon: Activity, group: "System" },
 ];
 
-const GROUP_ORDER = ["Dashboard", "Analysis", "Report"];
+const GROUP_ORDER = ["Dashboard", "Analysis", "Report", "System"];
 
 const SYSTEM_LINKS = [
   { slug: "/imports", label: "Imports", icon: Upload },

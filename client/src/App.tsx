@@ -30,6 +30,7 @@ import Settings from "@/pages/Settings";
 import Audit from "@/pages/Audit";
 import Imports from "@/pages/Imports";
 import Costs from "@/pages/Costs";
+import Diagnostics from "@/pages/Diagnostics";
 
 function AppRouter() {
   const [location] = useLocation();
@@ -60,6 +61,7 @@ function AppRouter() {
         <Route path="/audit" component={Audit} />
         <Route path="/imports" component={Imports} />
         <Route path="/costs" component={Costs} />
+        <Route path="/diagnostics" component={Diagnostics} />
         <Route component={NotFound} />
       </Switch>
       </ErrorBoundary>
