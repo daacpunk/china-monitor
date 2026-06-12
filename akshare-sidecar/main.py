@@ -912,8 +912,13 @@ def http_exception_handler(_request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    log.info("Starting akshare-sidecar on port %d (auth=%s, cache_ttl=%ds)",
-             PORT, "yes" if AKSHARE_TOKEN else "NO", CACHE_TTL_SECONDS)
-    # Bind to :: (dual-stack IPv4+IPv6). Railway private networking is
-    # IPv6-only between services, so binding 0.0.0.0 alone breaks intra-project calls.
-    uvicorn.run("main:app", host="::", port=PORT, log_level="info")
+    # Bind host is configurable:
+    #   - Railway private networking is IPv6-only between services, so there we
+    #     set BIND_HOST=:: (dual-stack).
+    #   - On a standalone VPS, a '::' socket can be IPv6-only (sysctl
+    #     net.ipv6.bindv6only=1), so Docker's IPv4 port mapping reaches TCP but
+    #     not HTTP. Default to 0.0.0.0 (IPv4) which Docker maps correctly.
+    bind_host = os.environ.get("BIND_HOST", "0.0.0.0")
+    log.info("Starting akshare-sidecar on %s:%d (auth=%s, cache_ttl=%ds)",
+             bind_host, PORT, "yes" if AKSHARE_TOKEN else "NO", CACHE_TTL_SECONDS)
+    uvicorn.run("main:app", host=bind_host, port=PORT, log_level="info")

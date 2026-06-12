@@ -20,6 +20,9 @@ services:
       AKSHARE_TOKEN: "${AKSHARE_TOKEN:?set AKSHARE_TOKEN in .env}"
       # Port the app binds inside the container (keep 8000 to match the image).
       PORT: "8000"
+      # Bind host. On a VPS keep 0.0.0.0 (IPv4) so Docker's port mapping works.
+      # (Railway sets BIND_HOST=:: for its IPv6-only internal network instead.)
+      BIND_HOST: "${BIND_HOST:-0.0.0.0}"
       # Optional cache tuning (defaults: 24h TTL, 500 entries).
       AKSHARE_CACHE_TTL: "${AKSHARE_CACHE_TTL:-86400}"
       AKSHARE_CACHE_MAX: "${AKSHARE_CACHE_MAX:-500}"
