@@ -464,60 +464,58 @@ def financials_valuation(
     def fetch():
         t0 = time.time()
         kv: Dict[str, Any] = {}
-        # Primary: EastMoney individual info (key/value table). This endpoint is
-        # currently flaky (intermittent empty/HTML -> 'Expecting value'); if it
-        # fails after retries, fall back to the all-A-share spot snapshot which
-        # is served from a different EastMoney path and stays reliable.
+
+        # Primary: stock_value_em — single-symbol EastMoney valuation table with
+        # PE(TTM)/PE(静)/市净率/市销率 + 总市值. Lightweight and reliable (one symbol),
+        # unlike stock_individual_info_em (no PE, often empty) and the heavy
+        # all-A-share snapshot (RemoteDisconnected). Latest row = current snapshot.
         try:
-            df = call_with_retry(lambda: ak.stock_individual_info_em(symbol=symbol), attempts=2)
+            v = call_with_retry(lambda: ak.stock_value_em(symbol=symbol), attempts=2)
+            if v is not None and not v.empty:
+                last = v.iloc[-1]
+                for col in v.columns:
+                    kv[str(col)] = last.get(col)
+        except Exception as ex:
+            log.warning("stock_value_em failed: %s", ex)
+
+        # Cross-host fallback (Baidu 股市通) for any missing PE / PB / mkt cap.
+        def baidu_latest(indicator):
+            try:
+                d = call_with_retry(
+                    lambda: ak.stock_zh_valuation_baidu(
+                        symbol=symbol, indicator=indicator, period="近一年"),
+                    attempts=2)
+                if d is not None and not d.empty and "value" in d.columns:
+                    return float(d.sort_values(d.columns[0]).iloc[-1]["value"])
+            except Exception as ex:
+                log.warning("baidu %s failed: %s", indicator, ex)
+            return None
+
+        if kv.get("PE(TTM)") in (None, "", "-", "--"):
+            b = baidu_latest("市盈率(TTM)")
+            if b is not None:
+                kv["PE(TTM)"] = b
+        if kv.get("市净率") in (None, "", "-", "--"):
+            b = baidu_latest("市净率")
+            if b is not None:
+                kv["市净率"] = b
+        if kv.get("总市值") in (None, "", "-", "--"):
+            b = baidu_latest("总市值")
+            if b is not None:
+                kv["总市值"] = b  # Baidu 总市值 in 亿元
+
+        # Name / industry / shares — best-effort from individual_info (may be empty).
+        try:
+            df = call_with_retry(lambda: ak.stock_individual_info_em(symbol=symbol), attempts=1)
             if df is not None and not df.empty:
                 cols = list(df.columns)
-                item_col = cols[0]
-                val_col = cols[1] if len(cols) > 1 else cols[0]
+                ic, vc = cols[0], (cols[1] if len(cols) > 1 else cols[0])
                 for _, row in df.iterrows():
-                    kv[str(row[item_col])] = row[val_col]
+                    k = str(row[ic])
+                    if k not in kv or kv.get(k) in (None, "", "-"):
+                        kv[k] = row[vc]
         except Exception as ex:
-            log.warning("stock_individual_info_em failed, trying spot fallback: %s", ex)
-
-        # stock_individual_info_em has NO PE/PB. Always enrich with the all-A-share
-        # spot snapshot (stock_zh_a_spot_em) which carries 市盈率-动态 / 市净率 /
-        # 总市值 / 流通市值 / 最新价 / 名称, filtered to this symbol. This is served from a
-        # different EastMoney path and stays reliable when individual_info 502s.
-        try:
-            spot = call_with_retry(lambda: ak.stock_zh_a_spot_em(), attempts=2)
-            if spot is not None and not spot.empty and "代码" in spot.columns:
-                row = spot[spot["代码"] == symbol]
-                if not row.empty:
-                    r0 = row.iloc[0]
-                    for col in spot.columns:
-                        # Don't overwrite non-empty info-em values with spot ones,
-                        # but spot is the only source of PE/PB so add those.
-                        if col not in kv or kv.get(col) in (None, "", "-"):
-                            kv[str(col)] = r0[col]
-        except Exception as ex:
-            log.warning("stock_zh_a_spot_em enrich failed: %s", ex)
-
-        # Last resort for PE/PB: Legulegu indicator series (Sina/legulegu host,
-        # not EastMoney) — returns daily pe/pe_ttm/pb/ps/dv_ratio/total_mv.
-        if kv.get("市盈率-动态") in (None, "", "-") and kv.get("市净率") in (None, "", "-"):
-            try:
-                ind = call_with_retry(
-                    lambda: ak.stock_a_indicator_lg(symbol=symbol), attempts=2)
-                if ind is not None and not ind.empty:
-                    last = ind.sort_values(ind.columns[0]).iloc[-1]
-                    # columns: trade_date, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm, total_mv
-                    if "pe_ttm" in ind.columns:
-                        kv.setdefault("市盈率-动态", last.get("pe_ttm"))
-                    if "pb" in ind.columns:
-                        kv.setdefault("市净率", last.get("pb"))
-                    if "total_mv" in ind.columns and kv.get("总市值") in (None, "", "-"):
-                        # total_mv is in 万元 (10k CNY) -> convert to 元
-                        try:
-                            kv["总市值"] = float(last.get("total_mv")) * 1e4
-                        except (TypeError, ValueError):
-                            pass
-            except Exception as ex:
-                log.warning("stock_a_indicator_lg fallback failed: %s", ex)
+            log.warning("stock_individual_info_em (name/industry) failed: %s", ex)
 
         log.info("valuation %s keys=%d in %.2fs", symbol, len(kv), time.time() - t0)
         return kv
@@ -545,10 +543,11 @@ def financials_valuation(
         "industry": kv.get("行业"),
         "market_cap": num("总市值"),
         "float_market_cap": num("流通市值"),
-        # PE/PB come from stock_zh_a_spot_em: '市盈率-动态', '市净率'.
-        "pe_ttm": num("市盈率-动态", "市盈率(动)", "市盈率(TTM)", "市盈率"),
-        "pe_static": num("市盈率(静)", "市盈率-静态"),
+        # PE/PB from stock_value_em ('PE(TTM)', 'PE(静)', '市净率', '市销率').
+        "pe_ttm": num("PE(TTM)", "市盈率(TTM)", "市盈率-动态", "市盈率(动)", "市盈率"),
+        "pe_static": num("PE(静)", "市盈率(静)", "市盈率-静态"),
         "pb": num("市净率"),
+        "ps_ttm": num("市销率", "PS(TTM)"),
         "price": num("最新价", "最新", "最新价格"),
         "total_shares": num("总股本"),
         "float_shares": num("流通股"),
@@ -556,7 +555,7 @@ def financials_valuation(
 
     return {
         "source": "akshare",
-        "endpoint": "stock_individual_info_em",
+        "endpoint": "stock_value_em",
         "symbol": symbol,
         "valuation": normalized,
         "raw": kv,
