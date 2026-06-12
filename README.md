@@ -271,9 +271,15 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   The endpoint degrades gracefully (returns nulls, no 502) but won't populate
   until the sidecar runs from a China-region host or a paid valuation source is
   wired in. Macro CPI/PPI and index OHLCV are unaffected.
-- Some NBS-sourced series not yet on the AKShare-macro path (e.g. urban
-  unemployment, HS-code product trade) may still show "—" from the host; the same
-  `akshareMacro` pattern can be extended to them.
+- **Urban unemployment** is wired (`/macro/unemployment` via
+  `macro_china_urban_unemployment`, interlinked into the report drivers) but its
+  AKShare source is **host-blocked** from Railway's IP (same as the valuation
+  endpoints) — it returns empty and falls back to CEIC. It will populate
+  automatically once the sidecar runs from a HK/mainland host.
+- **HS-code / commodity-level trade** (chips HS-8542, autos, machinery, energy)
+  is not exposed by a simple AKShare `macro_china_*` function — only aggregate
+  customs totals are. Commodity granularity needs a dedicated customs endpoint
+  (or a paid feed); scoped for a future build.
 
 ### Next
 - **Phase 6** — TBD.
