@@ -526,13 +526,30 @@ def financials_valuation(
         log.exception("financials_valuation failed")
         raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
 
+    import math as _math
+
+    def _jsonsafe(x):
+        """Coerce numpy/pandas scalars to plain JSON-safe values; NaN/Inf -> None."""
+        try:
+            import numpy as _np
+            if isinstance(x, _np.generic):
+                x = x.item()
+        except Exception:
+            pass
+        if isinstance(x, float) and not _math.isfinite(x):
+            return None
+        return x
+
     def num(*keys):
         for k in keys:
-            if k in kv and kv[k] not in (None, "", "-"):
+            if k in kv:
+                val = _jsonsafe(kv[k])
+                if val in (None, "", "-", "--"):
+                    continue
                 try:
-                    return float(kv[k])
+                    return float(val)
                 except (TypeError, ValueError):
-                    return kv[k]
+                    return val
         return None
 
     # Normalize the most useful fields (Chinese AKShare keys -> English).
@@ -558,7 +575,7 @@ def financials_valuation(
         "endpoint": "stock_value_em",
         "symbol": symbol,
         "valuation": normalized,
-        "raw": kv,
+        "raw": {str(k): _jsonsafe(val) for k, val in kv.items()},
         "fetched_at": datetime.utcnow().isoformat() + "Z",
     }
 
