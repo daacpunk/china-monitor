@@ -34,9 +34,10 @@ const KEY_SERIES: { id: string; label: string; category: string; cadenceDays: nu
   { id: "exports_yoy", label: "Exports YoY", category: "trade", cadenceDays: 45 },
   { id: "imports_yoy", label: "Imports YoY", category: "trade", cadenceDays: 45 },
   { id: "trade_balance_usd", label: "Trade Balance", category: "trade", cadenceDays: 45 },
-  { id: "chips_exports_yoy", label: "Electronics Exports (HS85)", category: "trade", cadenceDays: 50 },
-  { id: "autos_exports_yoy", label: "Vehicle Exports (HS87)", category: "trade", cadenceDays: 50 },
-  { id: "energy_imports_yoy", label: "Energy Imports (HS27)", category: "trade", cadenceDays: 50 },
+  // HS-chapter trade via chinadata lags the headline print ~1-2 months; allow 75d.
+  { id: "chips_exports_yoy", label: "Electronics Exports (HS85)", category: "trade", cadenceDays: 75 },
+  { id: "autos_exports_yoy", label: "Vehicle Exports (HS87)", category: "trade", cadenceDays: 75 },
+  { id: "energy_imports_yoy", label: "Energy Imports (HS27)", category: "trade", cadenceDays: 75 },
   // Cross-asset / FX
   { id: "usdcny_monthly", label: "USD/CNY", category: "fx", cadenceDays: 40 },
   { id: "oecd_cli_china", label: "OECD CLI China", category: "macro", cadenceDays: 60 },
