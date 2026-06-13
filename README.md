@@ -281,8 +281,18 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   customs totals are. Commodity granularity needs a dedicated customs endpoint
   (or a paid feed); scoped for a future build.
 
-### Next
-- **Phase 6** — TBD.
+### Report depth (gaps A–F, see SPEC_REPORT_DEPTH_A_F.md)
+- **A — Valuation context** (shipped): per-name PE/PB **percentile vs own 3–5y
+  history** + **peer rank/quartile within theme**. Sidecar
+  `/financials/valuation_history` (stock_value_em + Baidu fallback);
+  `server/equity/valuationContext.ts`; `GET /api/equity/valuation-context`.
+  Interlinked into the report `VALUATION CONTEXT` block (→ note + deck) and
+  shown as badges on the Sectors name rows (e.g. SMIC "P/E 87th pct (5.9y),
+  #5/7 cheapest in theme").
+
+### Next (planned A–F order: E → C → B → D → F)
+- **E** scenario/risk framing · **C** flows/positioning · **B** earnings layer ·
+  **D** policy transmission · **F** relative context.
 
 ---
 
