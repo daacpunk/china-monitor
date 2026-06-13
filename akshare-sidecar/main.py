@@ -580,6 +580,87 @@ def financials_valuation(
     }
 
 
+@app.get("/financials/valuation_history")
+def financials_valuation_history(
+    symbol: str = Query(..., description="6-digit A-share code"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Dated PE(TTM)/PB history for an A-share name (for percentile-vs-history).
+
+    Primary: ak.stock_value_em returns a multi-row dated table
+    (数据日期 / PE(TTM) / 市净率 / 总市值 …). Fallback: ak.stock_zh_valuation_baidu
+    (近十年) per indicator. Returns {data:[{date, pe_ttm, pb}]} ascending.
+    """
+    require_auth(x_akshare_token)
+    if not symbol.isdigit() or len(symbol) != 6:
+        raise HTTPException(status_code=400, detail="A-share symbol must be 6 digits")
+    key = ("valuation_history", symbol)
+
+    def fetch():
+        import re as _re
+        rows: List[Dict[str, Any]] = []
+        # Primary: stock_value_em full history.
+        try:
+            v = call_with_retry(lambda: ak.stock_value_em(symbol=symbol), attempts=2)
+            if v is not None and not v.empty:
+                cols = list(v.columns)
+                def find(*subs):
+                    for s in subs:
+                        for c in cols:
+                            if s in str(c):
+                                return c
+                    return None
+                dcol = find("数据日期", "日期")
+                pecol = find("PE(TTM)", "市盈率(TTM)")
+                pbcol = find("市净率")
+                if dcol:
+                    for _, r in v.iterrows():
+                        m = _re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", str(r[dcol]))
+                        d = (m.group(1) + "-" + m.group(2).zfill(2) + "-" + m.group(3).zfill(2)) if m else str(r[dcol])
+                        def g(c):
+                            try:
+                                x = float(r[c]) if c else None
+                                import math as _m
+                                return x if (x is not None and _m.isfinite(x)) else None
+                            except (TypeError, ValueError):
+                                return None
+                        rows.append({"date": d, "pe_ttm": g(pecol), "pb": g(pbcol)})
+        except Exception as ex:
+            log.warning("valuation_history stock_value_em failed: %s", ex)
+
+        # Fallback: Baidu dated PE/PB series merged by date.
+        if len(rows) < 30:
+            def baidu_series(indicator):
+                try:
+                    d = call_with_retry(
+                        lambda: ak.stock_zh_valuation_baidu(
+                            symbol=symbol, indicator=indicator, period="近十年"),
+                        attempts=2)
+                    if d is not None and not d.empty and "value" in d.columns:
+                        dc = d.columns[0]
+                        return {str(r[dc])[:10]: float(r["value"]) for _, r in d.iterrows()
+                                if str(r.get("value")) not in ("nan", "None", "")}
+                except Exception as ex:
+                    log.warning("baidu hist %s failed: %s", indicator, ex)
+                return {}
+            pe = baidu_series("市盈率(TTM)")
+            pb = baidu_series("市净率")
+            if pe or pb:
+                dates = sorted(set(list(pe.keys()) + list(pb.keys())))
+                rows = [{"date": d, "pe_ttm": pe.get(d), "pb": pb.get(d)} for d in dates]
+
+        rows.sort(key=lambda r: r["date"])
+        return rows
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("valuation_history failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+    return {"source": "akshare", "symbol": symbol, "count": len(rows),
+            "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
+
+
 # ─── Macro series (NBS/EastMoney via AKShare; bypasses US-IP WAF) ───────────
 def _macro_yoy_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Normalise an EastMoney cjsj macro DataFrame (cols 月份 / 当月 / 同比增长 ...)

@@ -505,6 +505,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // mirror that here for browser caching on most endpoints.
   const akCache = "public, max-age=86400"; // 24h
 
+  /** GET /api/equity/valuation-context?themes=semi,ev — PE/PB percentile + peer rank */
+  app.get("/api/equity/valuation-context", async (req, res) => {
+    try {
+      const { buildValuationContext } = await import("./equity/valuationContext");
+      const themesParam = String(req.query.themes || "").trim();
+      const themes = themesParam ? (themesParam.split(",").map((s) => s.trim()) as any[]) : undefined;
+      const ctx = await buildValuationContext(themes, 8);
+      res.json({ context: ctx, fetchedAt: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {

@@ -20,6 +20,7 @@ import { storage } from "../storage";
 import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "../equity/universe";
 import { getAkshareValuation } from "../clients/akshare";
 import { fetchSeries } from "../series/fetchSeries";
+import { buildValuationContext, valuationContextLine } from "../equity/valuationContext";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -130,26 +131,27 @@ async function sectorDigest(
     const tradeStr = tradeVals.length ? `\n  Customs trade (GACC via chinadata): ${tradeVals.join("; ")}` : "";
     blocks.push(`THEME ${t.label} (proxies: ${t.indexProxies.join(", ")})\n  Drivers: ${t.drivers.join("; ")}${tradeStr}\n  Names: ${names}`);
   }
-  // Pull spot valuation for featured A-share names (best-effort).
-  const valLines: string[] = [];
-  const featuredAshare = SECTOR_UNIVERSE.flatMap((t) => t.names).filter(
-    (n) => featured.has(n.symbol) && n.market === "ashare",
-  );
-  await Promise.all(
-    featuredAshare.slice(0, 8).map(async (n) => {
-      try {
-        const v = await getAkshareValuation(n.symbol);
-        const d = v.data?.[0];
-        if (d) valLines.push(`  - ${n.nameEn} [${n.symbol}]: P/E(ttm) ${fmt(d.pe_ttm)}, P/B ${fmt(d.pb, 2)}, mktcap ${d.market_cap != null ? (d.market_cap / 1e8).toFixed(0) + "亿" : "n/a"} [akshare]`);
-      } catch {
-        /* skip */
-      }
-    }),
-  );
-  return (
-    `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` +
-    (valLines.length ? `\nFEATURED-NAME VALUATIONS:\n${valLines.join("\n")}` : "")
-  );
+  // Valuation CONTEXT (Gap A): PE/PB percentile vs own history + peer rank in
+  // theme, for the emphasized themes' A-share names. Featured names listed first.
+  let valBlock = "";
+  try {
+    const ctxThemes = (emphasis.length ? emphasis : undefined) as CoverageTheme[] | undefined;
+    const vctx = await buildValuationContext(ctxThemes, 8);
+    const withData = vctx.filter((c) => c.peTtm != null || c.pb != null);
+    // Featured first, then by most-expensive percentile (most notable).
+    withData.sort((a, b) => {
+      const fa = featured.has(a.symbol) ? 0 : 1, fb = featured.has(b.symbol) ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      return (b.pePercentile ?? -1) - (a.pePercentile ?? -1);
+    });
+    const lines = withData.slice(0, 14).map((c) => `  - ${valuationContextLine(c)}${featured.has(c.symbol) ? " ★" : ""}`);
+    if (lines.length) {
+      valBlock = `\nVALUATION CONTEXT (PE/PB vs own history percentile + peer rank in theme; ★ = featured):\n${lines.join("\n")}`;
+    }
+  } catch {
+    /* skip valuation context on failure */
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock;
 }
 
 async function sonarDigest(

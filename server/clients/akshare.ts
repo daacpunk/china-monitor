@@ -181,6 +181,29 @@ export async function getAkshareValuation(
   }
 }
 
+/** Dated valuation history point. */
+export interface ValuationHistoryPoint {
+  date: string;
+  pe_ttm: number | null;
+  pb: number | null;
+}
+
+/** Dated PE(TTM)/PB history for an A-share name (for percentile-vs-history). */
+export async function getValuationHistory(
+  symbol: string,
+): Promise<{ data: ValuationHistoryPoint[]; error?: string }> {
+  try {
+    const qs = new URLSearchParams({ symbol });
+    const r = await getJson<{ data: ValuationHistoryPoint[] }>(
+      `/financials/valuation_history?${qs}`,
+      45_000,
+    );
+    return { data: r.data ?? [] };
+  } catch (err: any) {
+    return { data: [], error: err.message };
+  }
+}
+
 /** Macro YoY series point: { date: 'YYYY-MM', value: <pct> }. */
 export interface AkshareMacroPoint {
   date: string;

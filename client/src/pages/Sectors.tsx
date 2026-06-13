@@ -49,6 +49,15 @@ interface Valuation {
   pb?: number | null;
   price?: number | null;
 }
+interface ValuationCtx {
+  symbol: string;
+  pePercentile: number | null;
+  pbPercentile: number | null;
+  historyYears: number | null;
+  peThemeRank: number | null;
+  peThemeCount: number | null;
+  peThemeQuartile: number | null;
+}
 interface Catalyst {
   date: string;
   headline: string;
@@ -94,6 +103,16 @@ function NameRow({ name, themeId }: { name: SectorName; themeId: ThemeId }) {
     enabled: open && name.market === "ashare",
   });
   const val = valuationQuery.data?.data?.[0];
+
+  // Valuation context (Gap A): percentile vs own history + peer rank in theme.
+  // Deduped per theme via React Query key.
+  const ctxQuery = useQuery<{ context: ValuationCtx[] }, Error>({
+    queryKey: [`/api/equity/valuation-context`, themeId],
+    queryFn: async () => (await apiRequest("GET", `/api/equity/valuation-context?themes=${themeId}`)).json(),
+    enabled: open && name.market === "ashare",
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+  const vctx = ctxQuery.data?.context?.find((c) => c.symbol === name.symbol);
 
   const catalystMutation = useMutation<{ catalysts: Catalyst[] }, Error, void>({
     mutationFn: async () => {
@@ -142,6 +161,24 @@ function NameRow({ name, themeId }: { name: SectorName; themeId: ThemeId }) {
                 <div><div className="text-[10px] uppercase text-muted-foreground">Mkt Cap</div><div className="font-medium">{fmtCap(val.market_cap)}</div></div>
                 {val.industry && <div><div className="text-[10px] uppercase text-muted-foreground">Industry</div><div className="font-medium">{val.industry}</div></div>}
                 <Badge variant="outline" className="self-center text-[10px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">AKShare</Badge>
+                {vctx && (vctx.pePercentile != null || vctx.peThemeRank != null) && (
+                  <div className="flex w-full flex-wrap items-center gap-2 border-t pt-2">
+                    <span className="text-[10px] uppercase text-muted-foreground">Context</span>
+                    {vctx.pePercentile != null && (
+                      <Badge variant="outline" className={`text-[10px] ${vctx.pePercentile >= 80 ? "bg-red-500/10 text-red-700 dark:text-red-300" : vctx.pePercentile <= 20 ? "bg-green-500/10 text-green-700 dark:text-green-300" : ""}`} title={vctx.historyYears ? `over ${vctx.historyYears}y` : ""}>
+                        P/E {vctx.pePercentile.toFixed(0)}th pct{vctx.historyYears ? ` (${vctx.historyYears}y)` : ""}
+                      </Badge>
+                    )}
+                    {vctx.pbPercentile != null && (
+                      <Badge variant="outline" className="text-[10px]">P/B {vctx.pbPercentile.toFixed(0)}th pct</Badge>
+                    )}
+                    {vctx.peThemeRank != null && vctx.peThemeCount != null && vctx.peThemeCount > 1 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        #{vctx.peThemeRank}/{vctx.peThemeCount} cheapest in theme{vctx.peThemeQuartile === 1 ? " · cheapest Q" : vctx.peThemeQuartile === 4 ? " · priciest Q" : ""}
+                      </Badge>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-md border bg-background p-2 text-xs text-muted-foreground">
