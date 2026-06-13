@@ -918,40 +918,6 @@ def macro_unemployment(x_akshare_token: Optional[str] = Header(None, alias="X-AK
     )
 
 
-@app.get("/trade/_probe")
-def trade_probe(x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token")):
-    """TEMP Phase-6 probe: test which commodity-level trade sources are reachable
-    from this (HK) host. Returns reachability + a small sample for each."""
-    require_auth(x_akshare_token)
-    import requests as _rq
-    out: Dict[str, Any] = {}
-
-    # 1) Does AKShare expose any commodity/customs-by-good function? (sanity)
-    ak_fns = [f for f in dir(ak) if ("hgjck" in f or "customs" in f or "haiguan" in f)]
-    out["akshare_customs_fns"] = ak_fns
-
-    # 2) GACC English monthly report index page reachable?
-    def probe_url(name, url, headers=None):
-        try:
-            r = _rq.get(url, timeout=20, headers=headers or {
-                "User-Agent": "Mozilla/5.0 (compatible; china-monitor/1.0)"})
-            ct = r.headers.get("content-type", "")
-            body = r.text[:600] if "text" in ct or "html" in ct or "json" in ct else "(binary)"
-            out[name] = {"http": r.status_code, "content_type": ct, "len": len(r.content),
-                         "sample": body}
-        except Exception as ex:
-            out[name] = {"error": str(ex)[:200]}
-
-    # GACC portal + open stats query host + a known mirror.
-    probe_url("gacc_english", "http://english.customs.gov.cn/statics/report/monthly.html")
-    probe_url("gacc_stats_query", "http://stats.customs.gov.cn/")
-    probe_url("gacc_main", "http://www.customs.gov.cn/")
-    # cnopendata sample (structured mirror) — just check reachability.
-    probe_url("cnopendata", "https://www.cnopendata.com/data/m/customs/")
-
-    return out
-
-
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(
