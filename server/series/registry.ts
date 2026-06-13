@@ -13,7 +13,7 @@
  * direct seriesId mapping (`ceic.seriesId`). Falls back to FRED/Yahoo if CEIC fails.
  */
 
-export type DataSourceName = "ceic" | "nbs" | "fred" | "oecd" | "hkex" | "eastmoney" | "akshare" | "yahoo" | "stooq" | "pending";
+export type DataSourceName = "ceic" | "nbs" | "fred" | "oecd" | "hkex" | "eastmoney" | "akshare" | "chinadata" | "yahoo" | "stooq" | "pending";
 export type SeriesCategory =
   | "fai"
   | "margins"
@@ -158,6 +158,18 @@ export interface SeriesEntry {
     | "unemployment";
   yahoo?: YahooConfig;
   stooq?: StooqConfig;
+  /** chinadata.live HS-chapter trade (GACC-sourced). hs = '85'|'84'|'87'|'27';
+   *  metric selects exports/imports YoY or value level. */
+  productTrade?: {
+    hs: string;
+    metric:
+      | "exports_yoy"
+      | "imports_yoy"
+      | "balance_yoy"
+      | "exports_value_bn"
+      | "imports_value_bn"
+      | "balance_value_bn";
+  };
   notes?: string;
 }
 
@@ -336,6 +348,37 @@ export const REGISTRY: Record<string, SeriesEntry> = {
     ceic: { seriesId: 458962047, searchKeyword: "Trade Balance China", country: "CN", transform: "divide_1000" },
     nbs: { dbcode: "hgyd", code: "A060E0301" },
     notes: "AKShare macro_china_hgjck (出口-进口 金额) primary; CEIC id=458962047 fallback.",
+  },
+
+  // ─── Product / HS-chapter trade (chinadata.live, GACC-sourced) ───────────
+  // HS 85 electronics/electrical (incl. integrated circuits) — semis theme.
+  chips_exports_yoy: {
+    label: "Electronics Exports YoY % (HS85)", unit: "%", category: "trade",
+    fallback: "chinadata", productTrade: { hs: "85", metric: "exports_yoy" },
+    notes: "chinadata.live GACC HS-85 (electronics incl. ICs) export value YoY.",
+  },
+  chips_imports_yoy: {
+    label: "Electronics Imports YoY % (HS85)", unit: "%", category: "trade",
+    fallback: "chinadata", productTrade: { hs: "85", metric: "imports_yoy" },
+    notes: "chinadata.live GACC HS-85 import value YoY (chip-import proxy).",
+  },
+  // HS 84 machinery — tech/hardware theme.
+  machinery_exports_yoy: {
+    label: "Machinery Exports YoY % (HS84)", unit: "%", category: "trade",
+    fallback: "chinadata", productTrade: { hs: "84", metric: "exports_yoy" },
+    notes: "chinadata.live GACC HS-84 (machinery) export value YoY.",
+  },
+  // HS 87 vehicles — EV/auto theme.
+  autos_exports_yoy: {
+    label: "Vehicle Exports YoY % (HS87)", unit: "%", category: "trade",
+    fallback: "chinadata", productTrade: { hs: "87", metric: "exports_yoy" },
+    notes: "chinadata.live GACC HS-87 (vehicles, incl. EVs) export value YoY.",
+  },
+  // HS 27 mineral fuels / oil — energy theme.
+  energy_imports_yoy: {
+    label: "Energy Imports YoY % (HS27)", unit: "%", category: "trade",
+    fallback: "chinadata", productTrade: { hs: "27", metric: "imports_yoy" },
+    notes: "chinadata.live GACC HS-27 (mineral fuels/oil) import value YoY.",
   },
 
   // ─── Equity Indices ───────────────────────────────────────────────────────

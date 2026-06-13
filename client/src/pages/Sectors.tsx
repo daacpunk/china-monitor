@@ -245,6 +245,7 @@ export default function Sectors() {
         title="Sector Allocation"
         subtitle="Top-down themes → single names across tech, EV, battery, semis, AI, and consumer. Expand a theme to drill into constituents, valuation (AKShare), and live catalysts (Sonar Pro)."
       />
+      <ProductTradePanel />
       {isLoading ? (
         <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
       ) : error ? (
@@ -255,5 +256,58 @@ export default function Sectors() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Product / HS-chapter trade panel (GACC via chinadata) — thematic trade signals. */
+function ProductTradePanel() {
+  const ITEMS: { id: string; label: string; theme: string }[] = [
+    { id: "chips_exports_yoy", label: "Electronics exports", theme: "semis (HS85)" },
+    { id: "chips_imports_yoy", label: "Electronics imports", theme: "AI chips (HS85)" },
+    { id: "autos_exports_yoy", label: "Vehicle exports", theme: "EV/auto (HS87)" },
+    { id: "machinery_exports_yoy", label: "Machinery exports", theme: "capex (HS84)" },
+    { id: "energy_imports_yoy", label: "Energy imports", theme: "oil/fuels (HS27)" },
+  ];
+  const q = useQuery<{ items: any[] }, Error>({
+    queryKey: ["product-trade-panel"],
+    queryFn: async () => {
+      const items = await Promise.all(
+        ITEMS.map(async (it) => {
+          try {
+            const r = await (await apiRequest("GET", `/api/series/${it.id}`)).json();
+            const last = r.data?.length ? r.data[r.data.length - 1] : null;
+            return { ...it, value: last?.value ?? null, date: last?.date ?? null };
+          } catch {
+            return { ...it, value: null, date: null };
+          }
+        }),
+      );
+      return { items };
+    },
+  });
+
+  return (
+    <Card className="mb-4 p-4" data-testid="card-product-trade">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-semibold">Product trade · customs by HS chapter</div>
+        <span className="text-[11px] text-muted-foreground">GACC via chinadata · monthly YoY</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        {ITEMS.map((it) => {
+          const row = q.data?.items.find((x) => x.id === it.id);
+          const v: number | null = row?.value ?? null;
+          const tone = v == null ? "text-muted-foreground" : v > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+          return (
+            <div key={it.id} className="rounded-md border p-3" data-testid={`pt-${it.id}`}>
+              <div className="text-[10px] uppercase text-muted-foreground">{it.label}</div>
+              <div className={`mt-1 text-xl font-semibold ${tone}`}>
+                {q.isLoading ? "…" : v == null ? "—" : `${v > 0 ? "+" : ""}${v}%`}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{row?.date ?? ""} · {it.theme}</div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }

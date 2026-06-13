@@ -23,6 +23,7 @@ import {
   getHkHistorical,
   getAkshareMacro,
 } from "../clients/akshare";
+import { getProductTrade } from "../clients/chinadata";
 import { getStockConnectMonthlyAdt } from "../clients/hkex";
 import { getOecdSeries } from "../clients/oecd";
 
@@ -40,6 +41,7 @@ export interface Provenance {
     | "hkex"
     | "eastmoney"
     | "akshare"
+    | "chinadata"
     | "stooq"
     | "yahoo"
     | "pending"
@@ -194,6 +196,24 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
       }
     } catch (err: any) {
       console.warn(`[fetchSeries] AKShare macro failed for ${logicalId}:`, err.message);
+    }
+  }
+
+  // ─── Product / HS-chapter trade (chinadata.live, GACC-sourced) ───────────
+  if (entry.productTrade) {
+    try {
+      const r = await getProductTrade(entry.productTrade.hs, entry.productTrade.metric);
+      if (!r.error && r.data.length > 0) {
+        return {
+          data: r.data.map((p) => ({ date: p.date, value: p.value })),
+          provenance: { source: "chinadata", lastUpdated: now, subscribed: false, cacheHit: false },
+        };
+      }
+      if (r.error) {
+        console.warn(`[fetchSeries] chinadata HS-${entry.productTrade.hs} for ${logicalId}: ${r.error}`);
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] chinadata failed for ${logicalId}:`, err.message);
     }
   }
 

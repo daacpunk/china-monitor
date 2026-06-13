@@ -55,6 +55,12 @@ export const DEFAULT_BRIEF_DRIVERS = [
   "exports_yoy",
   "imports_yoy",
   "trade_balance_usd",
+  // Product/HS-chapter trade (GACC via chinadata) — thematic trade signals.
+  "chips_exports_yoy",
+  "chips_imports_yoy",
+  "autos_exports_yoy",
+  "machinery_exports_yoy",
+  "energy_imports_yoy",
   "new_home_prices_70city",
   "oecd_cli_china",
   "pmi_mfg",

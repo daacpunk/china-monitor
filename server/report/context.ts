@@ -19,6 +19,7 @@ import { buildBriefInputs, type BriefInputs } from "../analysis/brief";
 import { storage } from "../storage";
 import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "../equity/universe";
 import { getAkshareValuation } from "../clients/akshare";
+import { fetchSeries } from "../series/fetchSeries";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -88,10 +89,46 @@ async function sectorDigest(
 ): Promise<string> {
   const themes = emphasis.length ? emphasis.map((id) => THEMES_BY_ID[id]).filter(Boolean) : SECTOR_UNIVERSE;
   const featured = new Set(featuredNames);
+
+  // Map each coverage theme to the HS-chapter product-trade series most
+  // relevant to it, so the theme narrative cites live customs data.
+  const THEME_TRADE: Record<string, { id: string; label: string }[]> = {
+    semi: [
+      { id: "chips_exports_yoy", label: "Electronics exports YoY" },
+      { id: "chips_imports_yoy", label: "Electronics imports YoY" },
+    ],
+    ai: [{ id: "chips_imports_yoy", label: "Electronics imports YoY" }],
+    tech: [
+      { id: "chips_exports_yoy", label: "Electronics exports YoY" },
+      { id: "machinery_exports_yoy", label: "Machinery exports YoY" },
+    ],
+    ev: [{ id: "autos_exports_yoy", label: "Vehicle exports YoY" }],
+    battery: [{ id: "autos_exports_yoy", label: "Vehicle exports YoY" }],
+    consumer: [{ id: "machinery_exports_yoy", label: "Machinery exports YoY" }],
+  };
+
+  const tradeCache = new Map<string, string>();
+  async function tradeLine(id: string, label: string): Promise<string | null> {
+    if (!tradeCache.has(id)) {
+      try {
+        const r = await fetchSeries(id);
+        const last = r.data.length ? r.data[r.data.length - 1] : null;
+        const v = last?.value;
+        tradeCache.set(id, last && v != null ? `${label}: ${v > 0 ? "+" : ""}${v}% (${last.date})` : "");
+      } catch {
+        tradeCache.set(id, "");
+      }
+    }
+    return tradeCache.get(id) || null;
+  }
+
   const blocks: string[] = [];
   for (const t of themes) {
     const names = t.names.map((n) => `${n.nameEn} [${n.symbol}/${n.market}, ${n.role}]: ${n.thesis}`).join("; ");
-    blocks.push(`THEME ${t.label} (proxies: ${t.indexProxies.join(", ")})\n  Drivers: ${t.drivers.join("; ")}\n  Names: ${names}`);
+    const tradeRefs = THEME_TRADE[t.id] ?? [];
+    const tradeVals = (await Promise.all(tradeRefs.map((x) => tradeLine(x.id, x.label)))).filter(Boolean);
+    const tradeStr = tradeVals.length ? `\n  Customs trade (GACC via chinadata): ${tradeVals.join("; ")}` : "";
+    blocks.push(`THEME ${t.label} (proxies: ${t.indexProxies.join(", ")})\n  Drivers: ${t.drivers.join("; ")}${tradeStr}\n  Names: ${names}`);
   }
   // Pull spot valuation for featured A-share names (best-effort).
   const valLines: string[] = [];
