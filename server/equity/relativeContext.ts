@@ -148,7 +148,34 @@ function buildAhSignal(snap: AhPremiumSnapshot | null): AhPremiumSignal | null {
   };
 }
 
-async function buildIndexReturn(label: string, symbol: string): Promise<IndexReturn | null> {
+async function buildIndexReturn(
+  label: string,
+  symbol: string,
+  registryId?: string,
+): Promise<IndexReturn | null> {
+  // Prefer a reliable registry series (Yahoo/CEIC) when one is provided — the
+  // sidecar /index/historical (EastMoney push2his) is intermittently 502/empty.
+  if (registryId) {
+    try {
+      const r = await fetchSeries(registryId);
+      const pts = (r.data.filter((p) => p.value != null) as { date: string; value: number }[])
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (pts.length) {
+        const asOhlcv: AkshareOhlcvPoint[] = pts.map((p) => ({ date: p.date, close: p.value }));
+        const last = asOhlcv[asOhlcv.length - 1];
+        return {
+          index: label,
+          symbol,
+          lastClose: last?.close ?? null,
+          lastDate: last?.date ?? null,
+          ytdPct: returnSince(asOhlcv, ytdCutoff()),
+          ret12mPct: returnSince(asOhlcv, twelveMonthCutoff()),
+        };
+      }
+    } catch {
+      /* fall through to the sidecar index endpoint */
+    }
+  }
   const start = twelveMonthCutoff();
   const res = await getAkshareIndexHistorical({ symbol, start, period: "daily" }).catch(
     () => ({ data: [] as AkshareOhlcvPoint[], error: "unavailable" }),
@@ -229,7 +256,7 @@ async function assembleRelative(): Promise<AssembledRelative> {
   const notes: string[] = [];
   const [ahRes, csi300, shComp, hsi, crossAsset] = await Promise.all([
     getAhPremium().catch((e: any) => ({ data: null as AhPremiumSnapshot | null, error: e?.message })),
-    buildIndexReturn("CSI 300", "sh000300"),
+    buildIndexReturn("CSI 300", "sh000300", "csi300_monthly"),
     buildIndexReturn("Shanghai Composite", "sh000001"),
     buildHsiReturn(),
     buildCrossAsset(notes),
