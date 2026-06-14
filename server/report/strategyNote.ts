@@ -535,7 +535,10 @@ export async function regenerateSection(
 function stripFence(text: string): string {
   let s = (text || "").trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
+  if (fence) return fence[1].trim();
+  // Unclosed fence (truncated output): drop the leading ```json marker so the
+  // JSON body underneath can be parsed/repaired instead of failing on the fence.
+  s = s.replace(/^```(?:json)?\s*/i, "").trim();
   return s;
 }
 
@@ -580,7 +583,53 @@ function extractJsonObject(text: string): any | null {
   const b = s.lastIndexOf("}");
   const candidate = b > a ? s.slice(a, b + 1) : s.slice(a);
   try { return JSON.parse(candidate); } catch { /* fall through to repair */ }
+  // Robust truncation repair: try every commit point newest-first so complete
+  // leading scenarios survive even when the cut lands mid-string deep inside.
+  for (const repaired of repairCandidates(s.slice(a))) {
+    try { return JSON.parse(repaired); } catch { /* try next-earlier commit */ }
+  }
+  // Last resort: the simple single-pass closer.
   try { return JSON.parse(repairJson(s.slice(a), "{")); } catch { return null; }
+}
+
+/**
+ * Repair a truncated JSON object so complete leading fields/elements survive a
+ * mid-stream cut. Scans once, recording the bracket stack at every commit point
+ * (after a complete value), then returns prefixes closed newest-first. Ported
+ * from riskDashboard.ts where it reliably recovers partial scenario payloads.
+ */
+function repairCandidates(snippet: string): string[] {
+  const commits: { end: number; stack: string[] }[] = [];
+  const stack: string[] = [];
+  let inStr = false, esc = false, expectKey = false;
+  const commit = (end: number) => commits.push({ end, stack: [...stack] });
+  for (let i = 0; i < snippet.length; i++) {
+    const ch = snippet[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') { inStr = false; if (!expectKey) commit(i + 1); }
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "{") { stack.push("{"); expectKey = true; }
+    else if (ch === "[") { stack.push("["); expectKey = false; }
+    else if (ch === "}" || ch === "]") { stack.pop(); commit(i + 1); expectKey = false; }
+    else if (ch === ":") { expectKey = false; }
+    else if (ch === ",") { expectKey = stack[stack.length - 1] === "{"; }
+    else if (/[\d.eE+\-]|t|r|u|e|f|a|l|s|n/.test(ch)) {
+      const next = snippet[i + 1];
+      if (next === undefined || /[\s,}\]]/.test(next)) commit(i + 1);
+    }
+  }
+  const out: string[] = [];
+  for (let k = commits.length - 1; k >= 0; k--) {
+    const { end, stack: st } = commits[k];
+    let s = snippet.slice(0, end);
+    for (let j = st.length - 1; j >= 0; j--) s += st[j] === "[" ? "]" : "}";
+    out.push(s);
+  }
+  return out;
 }
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
