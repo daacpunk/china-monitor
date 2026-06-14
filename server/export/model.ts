@@ -10,6 +10,7 @@ import type { StrategyNote } from "@shared/schema";
 import { buildBriefInputs } from "../analysis/brief";
 import { renderLineChart, renderBarChart, renderDonut, type ChartSeries } from "./charts";
 import { buildRiskDashboard, type RiskBlock } from "../equity/riskDashboard";
+import { buildFlowsPositioning, type FlowsPositioning } from "../equity/flowsPositioning";
 import type { ScenarioSet } from "../report/strategyNote";
 import type { CoverageTheme } from "../equity/universe";
 
@@ -51,6 +52,9 @@ export interface DocModel {
   // scored risk dashboard for the dedicated deck section. Best-effort.
   scenarioSets?: ScenarioSet[];
   riskBlocks?: RiskBlock[];
+  // Flow & positioning (Gap C): northbound + margin + sector leaders + LLM
+  // regime, for the dedicated deck FLOWS slide. Best-effort.
+  flowsPositioning?: FlowsPositioning;
 }
 
 function fnum(n: any, d = 1): string {
@@ -152,6 +156,14 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     /* risk dashboard is best-effort; deck still renders without it */
   }
 
+  // Flow & positioning (Gap C) for the dedicated deck FLOWS slide.
+  let flowsPositioning: FlowsPositioning | undefined;
+  try {
+    flowsPositioning = await buildFlowsPositioning();
+  } catch {
+    /* flows are best-effort; deck still renders without them */
+  }
+
   return {
     title: note.title,
     asOfDate: note.asOfDate,
@@ -177,6 +189,7 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     model: note.model,
     scenarioSets,
     riskBlocks,
+    flowsPositioning,
   };
 }
 

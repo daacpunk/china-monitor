@@ -999,6 +999,270 @@ def macro_unemployment(x_akshare_token: Optional[str] = Header(None, alias="X-AK
     )
 
 
+# ─── Flows & positioning (Gap C: northbound / margin / leverage) ────────────
+def _flows_jsonsafe(x):
+    """Coerce numpy/pandas scalars to plain JSON-safe values; NaN/Inf -> None."""
+    import math as _math
+    try:
+        import numpy as _np
+        if isinstance(x, _np.generic):
+            x = x.item()
+    except Exception:
+        pass
+    if isinstance(x, float) and not _math.isfinite(x):
+        return None
+    return x
+
+
+def _col_finder(df: pd.DataFrame):
+    """Return a fn(*substrings) -> first matching column name (or None)."""
+    cols = list(df.columns)
+
+    def find(*subs):
+        for s in subs:
+            for c in cols:
+                if s in str(c):
+                    return c
+        return None
+
+    return find
+
+
+def _num_cell(row, col):
+    if not col:
+        return None
+    try:
+        v = float(row[col])
+    except (TypeError, ValueError):
+        return None
+    return _flows_jsonsafe(v)
+
+
+def _date_cell(row, col):
+    if not col:
+        return None
+    import re as _re
+    s = str(row[col])
+    m = _re.search(r"(\d{4})\D?(\d{1,2})\D?(\d{1,2})", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+    return s
+
+
+@app.get("/flows/northbound")
+def flows_northbound(
+    limit: int = Query(250, description="Recent rows to return (most recent N)"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Northbound (Stock Connect, 北向资金) daily history via ak.stock_hsgt_hist_em.
+
+    Source cols: 日期, 当日成交净买额, 买入成交额, 卖出成交额, 历史累计净买额,
+    当日资金流入, 当日余额, 持股市值. Returns a recent series (ascending) + latest
+    snapshot. Net buy / cumulative / holdings are the PRIMARY positioning signal.
+    """
+    require_auth(x_akshare_token)
+    key = ("flows_northbound",)
+
+    def fetch():
+        t0 = time.time()
+        df = call_with_retry(lambda: ak.stock_hsgt_hist_em(symbol="北向资金"), attempts=2)
+        log.info("stock_hsgt_hist_em rows=%d in %.2fs",
+                 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return []
+        find = _col_finder(df)
+        dcol = find("日期")
+        netcol = find("当日成交净买额", "成交净买额")
+        cumcol = find("历史累计净买额", "累计净买额")
+        mvcol = find("持股市值")
+        inflowcol = find("当日资金流入")
+        balcol = find("当日余额")
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            rows.append({
+                "date": _date_cell(r, dcol),
+                "daily_net_buy": _num_cell(r, netcol),
+                "cumulative_net_buy": _num_cell(r, cumcol),
+                "holdings_mktval": _num_cell(r, mvcol),
+                "daily_inflow": _num_cell(r, inflowcol),
+                "balance": _num_cell(r, balcol),
+            })
+        rows = [x for x in rows if x["date"]]
+        rows.sort(key=lambda x: x["date"])
+        return rows
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("flows_northbound failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    n = max(1, min(int(limit or 250), len(rows))) if rows else 0
+    recent = rows[-n:] if rows else []
+    latest = recent[-1] if recent else None
+    return {
+        "source": "akshare",
+        "endpoint": "stock_hsgt_hist_em",
+        "symbol": "北向资金",
+        "count": len(recent),
+        "data": recent,
+        "latest": latest,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/flows/northbound_summary")
+def flows_northbound_summary(
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Today's Stock Connect fund-flow summary via ak.stock_hsgt_fund_flow_summary_em.
+
+    Source cols: 交易日, 类型, 板块, 资金方向, 交易状态, 成交净买额, 资金净流入,
+    当日资金余额. Returns one ASCII row per board/direction.
+    """
+    require_auth(x_akshare_token)
+    key = ("flows_northbound_summary",)
+
+    def fetch():
+        t0 = time.time()
+        df = call_with_retry(lambda: ak.stock_hsgt_fund_flow_summary_em(), attempts=2)
+        log.info("stock_hsgt_fund_flow_summary_em rows=%d in %.2fs",
+                 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return []
+        find = _col_finder(df)
+        dcol = find("交易日")
+        typecol = find("类型")
+        boardcol = find("板块")
+        dircol = find("资金方向")
+        netbuycol = find("成交净买额")
+        netinflowcol = find("资金净流入")
+        balcol = find("当日资金余额", "资金余额")
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            rows.append({
+                "trade_date": _date_cell(r, dcol),
+                "type": (str(r[typecol]) if typecol else None),
+                "board": (str(r[boardcol]) if boardcol else None),
+                "direction": (str(r[dircol]) if dircol else None),
+                "net_buy": _num_cell(r, netbuycol),
+                "net_inflow": _num_cell(r, netinflowcol),
+                "balance": _num_cell(r, balcol),
+            })
+        return rows
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("flows_northbound_summary failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    return {
+        "source": "akshare",
+        "endpoint": "stock_hsgt_fund_flow_summary_em",
+        "count": len(rows),
+        "data": rows,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/flows/margin")
+def flows_margin(
+    limit: int = Query(250, description="Recent rows to return (most recent N)"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Market-wide margin / leverage via ak.stock_margin_account_info, plus a
+    best-effort SH detail series via ak.stock_margin_sse.
+
+    Market cols: 日期, 融资余额, 融券余额, 融资买入额, 融券卖出额, 证券公司数量,
+    营业部数量, 个人投资者数量. Returns recent series (ascending) + latest snapshot.
+    """
+    require_auth(x_akshare_token)
+    key = ("flows_margin",)
+
+    def fetch():
+        t0 = time.time()
+        df = call_with_retry(lambda: ak.stock_margin_account_info(), attempts=2)
+        log.info("stock_margin_account_info rows=%d in %.2fs",
+                 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return []
+        find = _col_finder(df)
+        dcol = find("日期")
+        finbalcol = find("融资余额")
+        shortbalcol = find("融券余额")
+        finbuycol = find("融资买入额")
+        shortsellcol = find("融券卖出额")
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            rows.append({
+                "date": _date_cell(r, dcol),
+                "financing_balance": _num_cell(r, finbalcol),
+                "short_balance": _num_cell(r, shortbalcol),
+                "financing_buy": _num_cell(r, finbuycol),
+                "short_sell": _num_cell(r, shortsellcol),
+            })
+        rows = [x for x in rows if x["date"]]
+        rows.sort(key=lambda x: x["date"])
+        return rows
+
+    def fetch_sse():
+        # SH-only credit-trading detail; best-effort (may SSL/parse fail).
+        end = datetime.utcnow().strftime("%Y%m%d")
+        start = (datetime.utcnow() - timedelta(days=400)).strftime("%Y%m%d")
+        df = call_with_retry(lambda: ak.stock_margin_sse(start_date=start, end_date=end), attempts=2)
+        if df is None or df.empty:
+            return []
+        find = _col_finder(df)
+        dcol = find("信用交易日期", "交易日期", "日期")
+        finbalcol = find("融资余额")
+        finbuycol = find("融资买入额")
+        totalcol = find("融资融券余额")
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            rows.append({
+                "date": _date_cell(r, dcol),
+                "financing_balance": _num_cell(r, finbalcol),
+                "financing_buy": _num_cell(r, finbuycol),
+                "total_margin_balance": _num_cell(r, totalcol),
+            })
+        rows = [x for x in rows if x["date"]]
+        rows.sort(key=lambda x: x["date"])
+        return rows
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("flows_margin failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    # SH detail is best-effort: never fail the whole endpoint if it errors.
+    sse_rows: List[Dict[str, Any]] = []
+    sse_note = None
+    try:
+        sse_rows = cache_get_or_call(("flows_margin_sse",), fetch_sse)
+    except Exception as ex:
+        log.warning("flows_margin sse detail failed: %s", ex)
+        sse_note = f"SH detail unavailable: {ex}"
+
+    n = max(1, min(int(limit or 250), len(rows))) if rows else 0
+    recent = rows[-n:] if rows else []
+    latest = recent[-1] if recent else None
+    sse_recent = sse_rows[-n:] if sse_rows else []
+    out = {
+        "source": "akshare",
+        "endpoint": "stock_margin_account_info",
+        "count": len(recent),
+        "data": recent,
+        "latest": latest,
+        "sse_detail": sse_recent,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+    if sse_note:
+        out["sse_note"] = sse_note
+    return out
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

@@ -22,6 +22,7 @@ import { getAkshareValuation } from "../clients/akshare";
 import { fetchSeries } from "../series/fetchSeries";
 import { buildValuationContext, valuationContextLine } from "../equity/valuationContext";
 import { buildRiskDashboard, riskDashboardDigest } from "../equity/riskDashboard";
+import { buildFlowsPositioning, flowsPositioningLine } from "../equity/flowsPositioning";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -166,7 +167,21 @@ async function sectorDigest(
   } catch {
     /* skip scenarios & risk on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + riskBlock;
+  // FLOWS & POSITIONING (Gap C): northbound (Stock Connect) net buy 5d/20d +
+  // cumulative direction, market-wide margin/leverage trend, top sector
+  // inflows/outflows, and an LLM-interpreted regime label. Mirrors the blocks
+  // above; degrades gracefully (never throws to the report).
+  let flowsBlock = "";
+  try {
+    const flows = await buildFlowsPositioning();
+    const line = flowsPositioningLine(flows);
+    if (line.trim()) {
+      flowsBlock = `\nFLOWS & POSITIONING (northbound 5d/20d + cumulative; margin/leverage trend; top sector in/outflows; LLM regime):\n  - ${line}`;
+    }
+  } catch {
+    /* skip flows & positioning on failure */
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + riskBlock + flowsBlock;
 }
 
 async function sonarDigest(

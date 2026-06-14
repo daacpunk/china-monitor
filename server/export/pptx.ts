@@ -136,6 +136,96 @@ function renderScenarioRiskSection(
   }
 }
 
+const REGIME_COLOR: Record<string, string> = {
+  "risk-on": "16A34A", "risk-off": "DC2626", neutral: "6B7280", extreme: "B91C1C",
+};
+
+/** CNY → 亿 (100M) string for deck readability. */
+function yiStr(v: number | null | undefined, d = 1): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${(v / 1e8).toFixed(d)}亿`;
+}
+
+/**
+ * Dedicated "Flows & Positioning" deck slide (Gap C):
+ *   - LLM regime label + confidence + narrative
+ *   - Northbound (Stock Connect) 5d/20d net + cumulative direction
+ *   - Margin / leverage trend + level
+ *   - Top sector inflow / outflow leaders
+ */
+function renderFlowsSection(
+  pptx: PptxGenJS,
+  model: DocModel,
+  io: { newSlide: (withFooter?: boolean) => PptxGenJS.Slide; heading: (s: PptxGenJS.Slide, title: string, sub?: string) => void; W: number; H: number },
+): void {
+  const f = model.flowsPositioning;
+  if (!f) return;
+  const nb = f.northbound, mg = f.margin;
+  const haveAny = !!(nb || mg || f.sectorInflows.length || f.sectorOutflows.length || f.regime);
+  if (!haveAny) return;
+  const { newSlide, heading, W, H } = io;
+
+  const s = newSlide();
+  heading(s, "Flows & Positioning", "Northbound · margin/leverage · sector flows · regime");
+
+  // Regime badge + narrative
+  if (f.regime) {
+    s.addText(
+      [
+        { text: `Regime: ${f.regime.toUpperCase()}`, options: { bold: true, fontSize: 16, color: REGIME_COLOR[f.regime] ?? C.body } },
+        ...(f.confidence != null ? [{ text: `   ${f.confidence}% confidence`, options: { fontSize: 12, color: C.muted } }] : []),
+      ],
+      { x: 0.5, y: 1.65, w: W - 1, h: 0.4, valign: "middle" },
+    );
+  }
+  if (f.narrative) {
+    s.addText(f.narrative, { x: 0.5, y: 2.1, w: W - 1, h: 1.0, fontSize: 12, color: C.body, valign: "top", lineSpacingMultiple: 1.12 });
+  }
+
+  // Metric table: northbound + margin
+  const metricRows: PptxGenJS.TableRow[] = [
+    ["Signal", "Reading"].map((t) => ({ text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 } })) as PptxGenJS.TableRow,
+  ];
+  if (nb) {
+    metricRows.push([
+      { text: "Northbound (Stock Connect)", options: { fontSize: 10, color: C.body } },
+      { text: `5d ${yiStr(nb.net5d)} · 20d ${yiStr(nb.net20d)} · cumulative ${nb.cumulativeDirection ?? "n/a"} (${yiStr(nb.cumulativeNetBuy)})`, options: { fontSize: 10, color: C.muted } },
+    ]);
+  }
+  if (mg) {
+    metricRows.push([
+      { text: "Margin / leverage", options: { fontSize: 10, color: C.body } },
+      { text: `${yiStr(mg.financingBalance)} · ${mg.trend ?? "n/a"}${mg.pctChange20d != null ? ` ${mg.pctChange20d > 0 ? "+" : ""}${mg.pctChange20d}% 20d` : ""} · level ${mg.level ?? "n/a"}`, options: { fontSize: 10, color: C.muted } },
+    ]);
+  }
+  if (metricRows.length > 1) {
+    s.addTable(metricRows, { x: 0.5, y: 3.2, w: W - 1, colW: [3.2, W - 4.2], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+  }
+
+  // Sector leaders (two columns)
+  const yLeaders = 4.5;
+  if (f.sectorInflows.length) {
+    s.addText("Top sector inflows (today)", { x: 0.5, y: yLeaders, w: 6, h: 0.3, fontSize: 12, bold: true, color: C.positive });
+    s.addText(f.sectorInflows.slice(0, 5).map((l) => ({ text: `${l.sector}  +${yiStr(l.netInflow)}`, options: { bullet: true, fontSize: 11, color: C.body } })), { x: 0.5, y: yLeaders + 0.35, w: 6.0, h: 1.7, valign: "top", paraSpaceAfter: 2 });
+  }
+  if (f.sectorOutflows.length) {
+    s.addText("Top sector outflows (today)", { x: 6.9, y: yLeaders, w: 6, h: 0.3, fontSize: 12, bold: true, color: C.negative });
+    s.addText(f.sectorOutflows.slice(0, 5).map((l) => ({ text: `${l.sector}  ${yiStr(l.netInflow)}`, options: { bullet: true, fontSize: 11, color: C.body } })), { x: 6.9, y: yLeaders + 0.35, w: 5.9, h: 1.7, valign: "top", paraSpaceAfter: 2 });
+  }
+
+  // Positioning extremes banner
+  if (f.positioningExtremes.length) {
+    s.addText("Positioning extremes:", { x: 0.5, y: H - 1.05, w: W - 1, h: 0.3, fontSize: 11, bold: true, color: C.warn });
+    s.addText(f.positioningExtremes.slice(0, 3).join(" · "), { x: 0.5, y: H - 0.75, w: W - 1, h: 0.4, fontSize: 10, color: C.body, valign: "top" });
+  }
+
+  s.addNotes(
+    `Flows & positioning regime: ${f.regime ?? "n/a"}${f.confidence != null ? ` (${f.confidence}%)` : ""}. ` +
+    `${f.narrative}${f.positioningExtremes.length ? ` Extremes: ${f.positioningExtremes.join("; ")}.` : ""}` +
+    `${f.notes.length ? ` Notes: ${f.notes.join(" ")}` : ""}`,
+  );
+}
+
 export async function renderPptx(model: DocModel): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "W", width: 13.333, height: 7.5 });
@@ -306,6 +396,9 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
 
   // ════════════════ 5b. SCENARIOS & RISK (Gap E) ════════════════
   renderScenarioRiskSection(pptx, model, { newSlide, heading, W, H });
+
+  // ════════════════ 5c. FLOWS & POSITIONING (Gap C) ════════════════
+  renderFlowsSection(pptx, model, { newSlide, heading, W, H });
 
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {

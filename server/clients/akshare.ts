@@ -204,6 +204,92 @@ export async function getValuationHistory(
   }
 }
 
+// ─── Flows & positioning (Gap C: northbound / margin / leverage) ────────────
+
+/** One daily northbound (Stock Connect, 北向资金) history point. Values in CNY. */
+export interface NorthboundPoint {
+  date: string;
+  daily_net_buy: number | null;
+  cumulative_net_buy: number | null;
+  holdings_mktval: number | null;
+  daily_inflow: number | null;
+  balance: number | null;
+}
+
+/** Today's Stock Connect fund-flow summary row (per board/direction). */
+export interface NorthboundSummaryRow {
+  trade_date: string | null;
+  type: string | null;
+  board: string | null;
+  direction: string | null;
+  net_buy: number | null;
+  net_inflow: number | null;
+  balance: number | null;
+}
+
+/** One daily market-wide margin/leverage point. Values in CNY. */
+export interface MarginPoint {
+  date: string;
+  financing_balance: number | null;
+  short_balance: number | null;
+  financing_buy: number | null;
+  short_sell: number | null;
+}
+
+/** SH-only credit-trading detail point (best-effort). */
+export interface MarginSsePoint {
+  date: string;
+  financing_balance: number | null;
+  financing_buy: number | null;
+  total_margin_balance: number | null;
+}
+
+/** Northbound (Stock Connect) daily history + latest snapshot. PRIMARY flow signal. */
+export async function getNorthboundFlows(
+  limit = 250,
+): Promise<AkshareResponse<NorthboundPoint> & { latest?: NorthboundPoint | null }> {
+  try {
+    const r = await getJson<{ data: NorthboundPoint[]; latest?: NorthboundPoint | null }>(
+      `/flows/northbound?limit=${encodeURIComponent(String(limit))}`,
+      45_000,
+    );
+    return { source: "akshare", data: r.data ?? [], latest: r.latest ?? null, fetchedAt: FETCHED_AT() };
+  } catch (err: any) {
+    return { source: "akshare", data: [], latest: null, fetchedAt: FETCHED_AT(), error: err.message };
+  }
+}
+
+/** Today's Stock Connect fund-flow summary (per board/direction). */
+export async function getNorthboundSummary(): Promise<AkshareResponse<NorthboundSummaryRow>> {
+  try {
+    const r = await getJson<{ data: NorthboundSummaryRow[] }>(`/flows/northbound_summary`);
+    return { source: "akshare", data: r.data ?? [], fetchedAt: FETCHED_AT() };
+  } catch (err: any) {
+    return { source: "akshare", data: [], fetchedAt: FETCHED_AT(), error: err.message };
+  }
+}
+
+/** Market-wide margin/leverage daily history + latest snapshot + (best-effort) SH detail. */
+export async function getMarginBalances(
+  limit = 250,
+): Promise<AkshareResponse<MarginPoint> & { latest?: MarginPoint | null; sseDetail?: MarginSsePoint[] }> {
+  try {
+    const r = await getJson<{ data: MarginPoint[]; latest?: MarginPoint | null; sse_detail?: MarginSsePoint[] }>(
+      `/flows/margin?limit=${encodeURIComponent(String(limit))}`,
+      45_000,
+    );
+    return {
+      source: "akshare",
+      data: r.data ?? [],
+      latest: r.latest ?? null,
+      sseDetail: r.sse_detail ?? [],
+      fetchedAt: FETCHED_AT(),
+    };
+  } catch (err: any) {
+    return { source: "akshare", data: [], latest: null, sseDetail: [], fetchedAt: FETCHED_AT(), error: err.message };
+  }
+}
+
 /** Macro YoY series point: { date: 'YYYY-MM', value: <pct> }. */
 export interface AkshareMacroPoint {
   date: string;

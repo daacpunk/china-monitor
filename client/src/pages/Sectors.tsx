@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Cpu, Car, BatteryCharging, Microchip, Bot, ShoppingBag,
   ChevronDown, ChevronRight, ExternalLink, Loader2, TrendingUp,
-  TrendingDown, Minus, Newspaper, ShieldAlert,
+  TrendingDown, Minus, Newspaper, ShieldAlert, Activity, AlertTriangle,
 } from "lucide-react";
 
 type ThemeId = "tech" | "ev" | "battery" | "semi" | "ai" | "consumer";
@@ -97,6 +97,52 @@ interface RiskDashboard {
   themes: string[];
   portfolio: RiskBlock;
   blocks: RiskBlock[];
+}
+
+interface NorthboundSignal {
+  latestDate: string | null;
+  net5d: number | null;
+  net20d: number | null;
+  cumulativeDirection: "rising" | "falling" | "flat" | null;
+  cumulativeNetBuy: number | null;
+  holdingsMktval: number | null;
+}
+interface MarginSignal {
+  latestDate: string | null;
+  financingBalance: number | null;
+  trend: "rising" | "falling" | "flat" | null;
+  pctChange20d: number | null;
+  level: "elevated" | "moderate" | "low" | null;
+}
+interface SectorFlowLeader {
+  sector: string;
+  netInflow: number | null;
+}
+interface FlowsPositioning {
+  generatedAt: string;
+  regime: "risk-on" | "risk-off" | "neutral" | "extreme" | null;
+  confidence: number | null;
+  narrative: string;
+  drivers: string[];
+  positioningExtremes: string[];
+  northbound: NorthboundSignal | null;
+  margin: MarginSignal | null;
+  sectorInflows: SectorFlowLeader[];
+  sectorOutflows: SectorFlowLeader[];
+  notes: string[];
+}
+
+const REGIME_TONE: Record<string, string> = {
+  "risk-on": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  "risk-off": "bg-red-500/10 text-red-700 dark:text-red-300",
+  neutral: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
+  extreme: "bg-orange-500/10 text-orange-700 dark:text-orange-300",
+};
+
+/** CNY → 亿 (100M) string for readability. */
+function fmtYi(v?: number | null, d = 1): string {
+  if (v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${(v / 1e8).toFixed(d)}亿`;
 }
 
 function scoreTone(score: number): string {
@@ -399,6 +445,7 @@ export default function Sectors() {
         subtitle="Top-down themes → single names across tech, EV, battery, semis, AI, and consumer. Expand a theme to drill into constituents, valuation (AKShare), and live catalysts (Sonar Pro)."
       />
       <ProductTradePanel />
+      <FlowsPositioningPanel />
       <PortfolioRiskPanel />
       {isLoading ? (
         <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
@@ -410,6 +457,116 @@ export default function Sectors() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Portfolio-level flow & positioning (Gap C) — northbound + margin + sector
+ * leaders + LLM regime. Loads on mount (cheap, 6h server cache); raw numbers
+ * always render, regime/extremes appear when the LLM call succeeds. */
+function FlowsPositioningPanel() {
+  const q = useQuery<FlowsPositioning, Error>({
+    queryKey: ["/api/equity/flows-positioning"],
+    queryFn: async () => (await apiRequest("GET", "/api/equity/flows-positioning")).json(),
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+  const f = q.data;
+  const nb = f?.northbound, mg = f?.margin;
+
+  return (
+    <Card className="mb-4 p-4" data-testid="card-flows-positioning">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Activity className="h-4 w-4 text-primary" /> Flows & positioning
+          <Badge variant="outline" className="text-[9px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">northbound · margin · LLM regime</Badge>
+        </div>
+        {f?.regime && (
+          <Badge variant="outline" className={`text-[10px] ${REGIME_TONE[f.regime] ?? ""}`} title={f.confidence != null ? `${f.confidence}% confidence` : ""}>
+            {f.regime}{f.confidence != null ? ` · ${f.confidence}%` : ""}
+          </Badge>
+        )}
+      </div>
+
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading northbound, margin/leverage, and sector flows…
+        </div>
+      ) : q.error ? (
+        <div className="text-xs text-red-600 dark:text-red-400">Unavailable: {q.error.message}</div>
+      ) : f ? (
+        <div className="space-y-3">
+          {f.positioningExtremes.length > 0 && (
+            <div className="flex flex-wrap items-start gap-1.5 rounded-md border border-orange-500/30 bg-orange-500/5 p-2">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-orange-600 dark:text-orange-400" />
+              <div className="flex flex-wrap gap-1.5">
+                {f.positioningExtremes.slice(0, 4).map((e, i) => (
+                  <span key={i} className="text-[11px] text-orange-700 dark:text-orange-300">{e}{i < Math.min(f.positioningExtremes.length, 4) - 1 ? " ·" : ""}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-md border p-3" data-testid="flows-nb-5d">
+              <div className="text-[10px] uppercase text-muted-foreground">Northbound 5d net</div>
+              <div className={`mt-1 text-xl font-semibold ${nb?.net5d == null ? "text-muted-foreground" : nb.net5d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {fmtYi(nb?.net5d)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{nb?.latestDate ?? ""}</div>
+            </div>
+            <div className="rounded-md border p-3" data-testid="flows-nb-20d">
+              <div className="text-[10px] uppercase text-muted-foreground">Northbound 20d net</div>
+              <div className={`mt-1 text-xl font-semibold ${nb?.net20d == null ? "text-muted-foreground" : nb.net20d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {fmtYi(nb?.net20d)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">cumulative {nb?.cumulativeDirection ?? "—"}</div>
+            </div>
+            <div className="rounded-md border p-3" data-testid="flows-margin">
+              <div className="text-[10px] uppercase text-muted-foreground">Margin balance</div>
+              <div className="mt-1 text-xl font-semibold">{fmtYi(mg?.financingBalance)}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {mg?.trend ?? "—"}{mg?.pctChange20d != null ? ` ${mg.pctChange20d > 0 ? "+" : ""}${mg.pctChange20d}% 20d` : ""} · {mg?.level ?? "—"}
+              </div>
+            </div>
+            <div className="rounded-md border p-3" data-testid="flows-holdings">
+              <div className="text-[10px] uppercase text-muted-foreground">NB holdings mktval</div>
+              <div className="mt-1 text-xl font-semibold">{fmtYi(nb?.holdingsMktval, 0)}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">cumulative {fmtYi(nb?.cumulativeNetBuy, 0)}</div>
+            </div>
+          </div>
+
+          {f.narrative && <div className="text-[12px] leading-snug text-foreground/90">{f.narrative}</div>}
+
+          {(f.sectorInflows.length > 0 || f.sectorOutflows.length > 0) && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {f.sectorInflows.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Top sector inflows (today)</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {f.sectorInflows.slice(0, 5).map((l) => (
+                      <Badge key={l.sector} variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{l.sector} +{fmtYi(l.netInflow)}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {f.sectorOutflows.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-red-700 dark:text-red-400">Top sector outflows (today)</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {f.sectorOutflows.slice(0, 5).map((l) => (
+                      <Badge key={l.sector} variant="outline" className="text-[10px] bg-red-500/10 text-red-700 dark:text-red-300">{l.sector} {fmtYi(l.netInflow)}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!nb && !mg && f.sectorInflows.length === 0 && f.notes.length > 0 && (
+            <div className="text-[11px] text-muted-foreground">{f.notes.join(" ")}</div>
+          )}
+        </div>
+      ) : null}
+    </Card>
   );
 }
 

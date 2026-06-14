@@ -531,6 +531,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/equity/flows-positioning — northbound + margin + sector flows + LLM regime (Gap C) */
+  app.get("/api/equity/flows-positioning", async (_req, res) => {
+    try {
+      const { buildFlowsPositioning } = await import("./equity/flowsPositioning");
+      const flows = await buildFlowsPositioning();
+      res.json(flows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {
