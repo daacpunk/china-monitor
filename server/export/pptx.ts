@@ -538,7 +538,15 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
     if (!fig) return;
     const s = newSlide();
     heading(s, title);
-    s.addImage({ data: pngToDataUri(fig.png), x: 1.4, y: 1.6, w: 10.5, h: 5.0 });
+    // Charts are rendered at 900x480 (aspect 1.875). Fit inside the content box
+    // WITHOUT distorting — distortion squashed legend/label text off-canvas.
+    // `sizing.contain` letterboxes the image to preserve its aspect ratio.
+    const boxX = 1.4, boxY = 1.6, boxW = 10.5, boxH = 5.0;
+    s.addImage({
+      data: pngToDataUri(fig.png),
+      x: boxX, y: boxY, w: boxW, h: boxH,
+      sizing: { type: "contain", w: boxW, h: boxH },
+    });
     if (notes) s.addNotes(notes);
   };
 

@@ -1,6 +1,7 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "node:fs/promises";
+import { rm, readFile, mkdir, copyFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -57,6 +58,17 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Copy bundled chart fonts into dist/ so @napi-rs/canvas can register them at
+  // runtime (the production container has no system fonts). charts.ts probes
+  // dist/fonts as one of its candidate paths.
+  console.log("copying chart fonts...");
+  await mkdir("dist/fonts", { recursive: true });
+  for (const f of ["DejaVuSans.ttf", "DejaVuSans-Bold.ttf"]) {
+    const src = `server/export/fonts/${f}`;
+    if (existsSync(src)) await copyFile(src, `dist/fonts/${f}`);
+    else console.warn(`  font missing: ${src}`);
+  }
 }
 
 buildAll().catch((err) => {

@@ -7,10 +7,57 @@
  * provenance caption to honor the "provenance on every figure" principle.
  */
 
-import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, type SKRSContext2D } from "@napi-rs/canvas";
 import { BRAND } from "@shared/brand";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 
 const C = BRAND.colors;
+
+// ── Font registration ────────────────────────────────────────────────────────
+// The production container (Railway/Nixpacks) ships with NO system fonts, so the
+// "sans-serif" alias resolves to nothing and @napi-rs/canvas silently draws no
+// text — charts rendered as shapes with blank titles/legends/axes. We bundle
+// DejaVu Sans in the repo and register it explicitly so text always renders,
+// regardless of the host's installed fonts. CHART_FONT is the registered family.
+export const CHART_FONT = "China Monitor Sans";
+let FONT_READY = false;
+function ensureFont(): void {
+  if (FONT_READY) return;
+  try {
+    // Resolve the bundled fonts relative to this module (works from src + dist).
+    let here: string;
+    try { here = dirname(fileURLToPath(import.meta.url)); }
+    catch { here = __dirname; }
+    const candidates = [
+      join(here, "fonts"),
+      join(here, "..", "server", "export", "fonts"),
+      join(process.cwd(), "server", "export", "fonts"),
+      join(process.cwd(), "dist", "fonts"),
+    ];
+    let registered = false;
+    for (const dir of candidates) {
+      const reg = join(dir, "DejaVuSans.ttf");
+      const bold = join(dir, "DejaVuSans-Bold.ttf");
+      if (existsSync(reg)) {
+        GlobalFonts.registerFromPath(reg, CHART_FONT);
+        if (existsSync(bold)) GlobalFonts.registerFromPath(bold, CHART_FONT);
+        registered = true;
+        break;
+      }
+    }
+    // Fallback: pull in any system fonts that do exist so we never draw blank.
+    // `loadSystemFonts` exists at runtime but isn't in the type defs.
+    const gf = GlobalFonts as unknown as { loadSystemFonts?: () => void };
+    if (!registered && typeof gf.loadSystemFonts === "function") {
+      gf.loadSystemFonts();
+    }
+  } catch {
+    /* best-effort: if registration fails the canvas falls back to its default */
+  }
+  FONT_READY = true;
+}
 
 export interface SeriesPoint { x: string | number; y: number; }
 export interface ChartSeries { label: string; points: SeriesPoint[]; color?: string; }
@@ -28,6 +75,7 @@ const DEFAULT_H = 480;
 const PAD = { top: 56, right: 28, bottom: 64, left: 64 };
 
 function setup(opts: ChartOpts): { canvas: any; ctx: SKRSContext2D; w: number; h: number } {
+  ensureFont();
   const w = opts.width ?? DEFAULT_W;
   const h = opts.height ?? DEFAULT_H;
   const canvas = createCanvas(w, h);
@@ -38,7 +86,7 @@ function setup(opts: ChartOpts): { canvas: any; ctx: SKRSContext2D; w: number; h
   // Title
   if (opts.title) {
     ctx.fillStyle = "#" + C.ink;
-    ctx.font = "bold 20px sans-serif";
+    ctx.font = `bold 20px ${CHART_FONT}`;
     ctx.textBaseline = "top";
     ctx.fillText(opts.title, PAD.left, 16);
   }
@@ -48,7 +96,7 @@ function setup(opts: ChartOpts): { canvas: any; ctx: SKRSContext2D; w: number; h
 function finish(canvas: any, ctx: SKRSContext2D, opts: ChartOpts, w: number, h: number): Buffer {
   if (opts.caption) {
     ctx.fillStyle = "#" + C.muted;
-    ctx.font = "12px sans-serif";
+    ctx.font = `12px ${CHART_FONT}`;
     ctx.textBaseline = "bottom";
     ctx.fillText(opts.caption, PAD.left, h - 8);
   }
@@ -68,7 +116,7 @@ function drawAxes(ctx: SKRSContext2D, w: number, h: number, lo: number, hi: numb
   ctx.lineWidth = 1;
   // y gridlines + labels (5 ticks)
   ctx.fillStyle = "#" + C.muted;
-  ctx.font = "12px sans-serif";
+  ctx.font = `12px ${CHART_FONT}`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
   for (let i = 0; i <= 5; i++) {
@@ -126,7 +174,7 @@ export function renderLineChart(series: ChartSeries[], opts: ChartOpts = {}): Bu
 
   // x labels (first / mid / last)
   ctx.fillStyle = "#" + C.muted;
-  ctx.font = "12px sans-serif";
+  ctx.font = `12px ${CHART_FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   const longest = series.reduce((a, b) => (b.points.length > a.points.length ? b : a), series[0]);
@@ -158,7 +206,7 @@ export function renderBarChart(labels: string[], values: number[], opts: ChartOp
     ctx.fillStyle = v >= 0 ? "#" + C.positive : "#" + C.negative;
     ctx.fillRect(cx - bw / 2, Math.min(y, zeroY), bw, Math.abs(y - zeroY));
     ctx.fillStyle = "#" + C.muted;
-    ctx.font = "11px sans-serif";
+    ctx.font = `11px ${CHART_FONT}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(truncate(labels[i] ?? "", 12), cx, plotB + 6);
@@ -197,7 +245,7 @@ export function renderDonut(labels: string[], values: number[], opts: ChartOpts 
   let ly = PAD.top + 6;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.font = "13px sans-serif";
+  ctx.font = `13px ${CHART_FONT}`;
   labels.forEach((lab, i) => {
     ctx.fillStyle = BRAND.chartPalette[i % BRAND.chartPalette.length];
     ctx.fillRect(legendX, ly - 6, 12, 12);
@@ -213,7 +261,7 @@ function drawLegend(ctx: SKRSContext2D, series: ChartSeries[], x: number, y: num
   let cx = x;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.font = "13px sans-serif";
+  ctx.font = `13px ${CHART_FONT}`;
   series.forEach((s, i) => {
     const color = s.color ?? BRAND.chartPalette[i % BRAND.chartPalette.length];
     ctx.fillStyle = color;
