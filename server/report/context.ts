@@ -21,6 +21,7 @@ import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "../equity/uni
 import { getAkshareValuation } from "../clients/akshare";
 import { fetchSeries } from "../series/fetchSeries";
 import { buildValuationContext, valuationContextLine } from "../equity/valuationContext";
+import { buildRiskDashboard, riskDashboardDigest } from "../equity/riskDashboard";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -151,7 +152,21 @@ async function sectorDigest(
   } catch {
     /* skip valuation context on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock;
+  // SCENARIOS & RISK (Gap E): scored risks + bull/base/bear + falsification per
+  // theme + portfolio, grounded in the live series. Mirrors the VALUATION CONTEXT
+  // block above; degrades gracefully (never throws to the report).
+  let riskBlock = "";
+  try {
+    const riskThemes = (emphasis.length ? emphasis : undefined) as CoverageTheme[] | undefined;
+    const dash = await buildRiskDashboard(riskThemes);
+    const digest = riskDashboardDigest(dash);
+    if (digest.trim()) {
+      riskBlock = `\nSCENARIOS & RISK (scored L×I risks + bull/base/bear + falsification; portfolio + per theme):\n${digest}`;
+    }
+  } catch {
+    /* skip scenarios & risk on failure */
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + riskBlock;
 }
 
 async function sonarDigest(

@@ -20,11 +20,29 @@ import { SECTOR_UNIVERSE, type CoverageTheme } from "../equity/universe";
 
 export type ComposerMode = "data_driven" | "thesis_driven";
 
+/** Structured scenario (bull/base/bear) for the scenarios section + deck. */
+export interface NoteScenario {
+  label: "bull" | "base" | "bear";
+  narrative: string;
+  triggers: string[];
+  probability: number | null;
+  keyDrivers: string[];
+}
+
+/** Structured payload carried by the scenarios section (Gap E). */
+export interface ScenarioSet {
+  scope: string;            // "portfolio" or a theme id
+  scenarios: NoteScenario[];
+  falsification: string[];  // what would prove the thesis wrong
+}
+
 export interface StrategyNoteSection {
   key: string;
   heading: string;
   body: string;
   sources?: { name: string; url: string }[];
+  /** Machine-readable payload (e.g. the scenarios section's bull/base/bear). */
+  data?: { scenarioSets?: ScenarioSet[] };
 }
 
 export interface PortfolioPick {
@@ -256,6 +274,100 @@ async function genVerdict(
   return { verdict, cost: res.costUsd, tin: res.tokensIn, tout: res.tokensOut };
 }
 
+// ── Structured scenarios (Gap E): bull/base/bear + falsification ────────────────
+async function genScenarios(
+  ctx: ReportContext,
+  opts: GenerateOpts,
+  contextBlock: string,
+): Promise<{ section: StrategyNoteSection; cost: number; tin: number; tout: number }> {
+  const model = opts.model ?? "claude-sonnet-4";
+  const emphasis = opts.emphasis.join(", ") || "all themes";
+  const system =
+    baseSystem(opts.mode, model) +
+    " Now produce STRUCTURED bull/base/bear scenarios at the PORTFOLIO level (plus, where the evidence " +
+    "supports it, the emphasized themes), each with explicit triggers, key drivers, and a rough probability. " +
+    "Also produce a FALSIFICATION list: concrete, observable conditions that would prove the base/bull thesis WRONG. " +
+    "The BEAR scenario must reflect the devil's-advocate / red-team risks present in the SCENARIOS & RISK evidence. " +
+    "Output STRICT JSON only.";
+  const user =
+    `${contextBlock}\n\n` +
+    `Emphasized themes: ${emphasis}.\n` +
+    `Output STRICT JSON: {"scenarioSets":[{"scope":"portfolio"|<themeId>,"scenarios":[` +
+    `{"label":"bull","narrative","triggers":[..],"probability":0-100 or null,"keyDrivers":[..]},` +
+    `{"label":"base",...},{"label":"bear",...}],"falsification":["observation that would prove the thesis wrong",...]}]}. ` +
+    `Always include a "portfolio" scenarioSet; add per-theme sets only where the evidence is rich. ` +
+    `Probabilities within a set should sum to ~100 if provided. Ground narratives in the evidence base.`;
+  const res = await generateCommentary({
+    model,
+    systemPrompt: system,
+    userPrompt: user,
+    actionContext: "report_scenarios_structured",
+    maxOutputTokens: 3000,
+  });
+
+  let scenarioSets: ScenarioSet[] = [];
+  try {
+    const obj = extractJsonObject(res.text);
+    if (obj && Array.isArray(obj.scenarioSets)) {
+      scenarioSets = obj.scenarioSets
+        .filter((s: any) => s && Array.isArray(s.scenarios))
+        .map((s: any) => ({
+          scope: String(s.scope ?? "portfolio"),
+          scenarios: parseNoteScenarios(s.scenarios),
+          falsification: Array.isArray(s.falsification) ? s.falsification.map((x: any) => String(x)).filter(Boolean).slice(0, 6) : [],
+        }))
+        .filter((s: ScenarioSet) => s.scenarios.length);
+    }
+  } catch {
+    /* fall through to prose */
+  }
+
+  const body = scenarioSets.length ? renderScenariosProse(scenarioSets) : res.text.trim();
+  return {
+    section: { key: "scenarios", heading: "Scenarios (Base / Bull / Bear)", body, data: scenarioSets.length ? { scenarioSets } : undefined },
+    cost: res.costUsd,
+    tin: res.tokensIn,
+    tout: res.tokensOut,
+  };
+}
+
+function parseNoteScenarios(arr: any): NoteScenario[] {
+  if (!Array.isArray(arr)) return [];
+  const wanted: NoteScenario["label"][] = ["bull", "base", "bear"];
+  const out: NoteScenario[] = [];
+  for (const label of wanted) {
+    const s = arr.find((x: any) => String(x?.label ?? "").toLowerCase() === label);
+    if (!s) continue;
+    const prob = s.probability == null ? null : Math.max(0, Math.min(100, Math.round(Number(s.probability))));
+    out.push({
+      label,
+      narrative: String(s.narrative ?? "").trim(),
+      triggers: Array.isArray(s.triggers) ? s.triggers.map((x: any) => String(x)).filter(Boolean).slice(0, 6) : [],
+      probability: Number.isFinite(prob as number) ? (prob as number) : null,
+      keyDrivers: Array.isArray(s.keyDrivers) ? s.keyDrivers.map((x: any) => String(x)).filter(Boolean).slice(0, 6) : [],
+    });
+  }
+  return out;
+}
+
+/** Backward-compatible readable prose from the structured scenario sets. */
+function renderScenariosProse(sets: ScenarioSet[]): string {
+  const blocks: string[] = [];
+  for (const set of sets) {
+    const title = set.scope === "portfolio" ? "Portfolio" : set.scope;
+    const lines: string[] = [`### ${title}`];
+    for (const s of set.scenarios) {
+      const head = `**${s.label[0].toUpperCase() + s.label.slice(1)}${s.probability != null ? ` (~${s.probability}%)` : ""}.**`;
+      lines.push(`${head} ${s.narrative}`);
+      if (s.triggers.length) lines.push(`- Triggers: ${s.triggers.join("; ")}`);
+      if (s.keyDrivers.length) lines.push(`- Key drivers: ${s.keyDrivers.join("; ")}`);
+    }
+    if (set.falsification.length) lines.push(`**Falsification (thesis wrong if):** ${set.falsification.join("; ")}`);
+    blocks.push(lines.join("\n"));
+  }
+  return blocks.join("\n\n");
+}
+
 // ── Red-team section (always in Mode B; available in A) ─────────────────────────
 async function genRedTeam(
   baseThesis: string,
@@ -298,8 +410,12 @@ export async function generateStrategyNote(opts: GenerateOpts): Promise<Generate
   const sections: StrategyNoteSection[] = [];
 
   // Generate prose sections sequentially (keeps cost predictable; respects rate limits).
+  // The scenarios section is generated as STRUCTURED bull/base/bear + falsification
+  // (Gap E), then rendered to prose for backward-compatible display.
   for (const def of SECTION_DEFS) {
-    const r = await genSection(def, ctx, opts, contextBlock);
+    const r = def.key === "scenarios"
+      ? await genScenarios(ctx, opts, contextBlock)
+      : await genSection(def, ctx, opts, contextBlock);
     sections.push(r.section);
     cost += r.cost; tin += r.tin; tout += r.tout;
   }
@@ -360,6 +476,10 @@ export async function regenerateSection(
   if (key === "risks_redteam") {
     const rt = await genRedTeam(opts.userThesis || "China/HK equity base case", contextBlock, opts);
     return { section: rt.section, costUsd: rt.cost };
+  }
+  if (key === "scenarios") {
+    const sc = await genScenarios(ctx, opts, contextBlock);
+    return { section: sc.section, costUsd: sc.cost };
   }
   if (!def) throw new Error(`Unknown section: ${key}`);
   const r = await genSection(def, ctx, opts, contextBlock);

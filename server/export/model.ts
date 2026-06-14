@@ -9,6 +9,9 @@
 import type { StrategyNote } from "@shared/schema";
 import { buildBriefInputs } from "../analysis/brief";
 import { renderLineChart, renderBarChart, renderDonut, type ChartSeries } from "./charts";
+import { buildRiskDashboard, type RiskBlock } from "../equity/riskDashboard";
+import type { ScenarioSet } from "../report/strategyNote";
+import type { CoverageTheme } from "../equity/universe";
 
 export interface DocFigure {
   id: string;
@@ -40,10 +43,14 @@ export interface DocModel {
     contradictingEvidence: { point: string; source?: { name: string; url: string } }[];
     evidenceGaps: string[]; corrections: string[]; alternatives: string[];
   };
-  sections: { key: string; heading: string; body: string }[];
+  sections: { key: string; heading: string; body: string; data?: { scenarioSets?: ScenarioSet[] } }[];
   citations: { name: string; url: string }[];
   figures: DocFigure[];
   model: string;
+  // Scenario & Risk (Gap E): structured bull/base/bear from the note + a fresh
+  // scored risk dashboard for the dedicated deck section. Best-effort.
+  scenarioSets?: ScenarioSet[];
+  riskBlocks?: RiskBlock[];
 }
 
 function fnum(n: any, d = 1): string {
@@ -131,6 +138,20 @@ const MODE_LABEL: Record<string, string> = {
 export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
   const hv = (note.houseViewSnapshot as any) ?? null;
   const figures = await buildFigures(note);
+
+  // Scenario & Risk (Gap E) for the dedicated deck section.
+  const sections = (note.sections as any[]) ?? [];
+  const scenSection = sections.find((s) => s.key === "scenarios");
+  const scenarioSets: ScenarioSet[] | undefined = scenSection?.data?.scenarioSets;
+  let riskBlocks: RiskBlock[] | undefined;
+  try {
+    const emphasis = ((note.emphasis as any[]) ?? []) as CoverageTheme[];
+    const dash = await buildRiskDashboard(emphasis.length ? emphasis : undefined);
+    riskBlocks = [dash.portfolio, ...dash.blocks].filter((b) => b.risks.length || b.scenarios.length);
+  } catch {
+    /* risk dashboard is best-effort; deck still renders without it */
+  }
+
   return {
     title: note.title,
     asOfDate: note.asOfDate,
@@ -150,10 +171,12 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
       : null,
     portfolio: (note.portfolio as any[]) ?? undefined,
     thesisVerdict: (note.thesisVerdict as any) ?? undefined,
-    sections: (note.sections as any[]) ?? [],
+    sections: sections,
     citations: (note.citations as any[]) ?? [],
     figures,
     model: note.model,
+    scenarioSets,
+    riskBlocks,
   };
 }
 

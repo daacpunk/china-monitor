@@ -44,6 +44,98 @@ function plain(md: string): string {
     .trim();
 }
 
+// Risk score → cell fill (heat). score = likelihood × impact, 1..25.
+function scoreFill(score: number): string {
+  if (score >= 16) return "FCA5A5"; // high — red-300
+  if (score >= 9) return "FCD34D";  // medium — amber-300
+  return "BBF7D0";                  // low — green-200
+}
+
+const SCEN_COLOR: Record<string, string> = { bull: "16A34A", base: "6B7280", bear: "DC2626" };
+
+/**
+ * Dedicated "Scenarios & Risk" deck section (Gap E):
+ *   - one scored risk matrix table per scope (portfolio + emphasized themes)
+ *   - one bull/base/bear scenario table per scope (with falsification list)
+ */
+function renderScenarioRiskSection(
+  pptx: PptxGenJS,
+  model: DocModel,
+  io: {
+    newSlide: (withFooter?: boolean) => PptxGenJS.Slide;
+    heading: (s: PptxGenJS.Slide, title: string, sub?: string) => void;
+    W: number;
+    H: number;
+  },
+): void {
+  const { newSlide, heading, W, H } = io;
+  const blocks = model.riskBlocks ?? [];
+  const scenSets = model.scenarioSets ?? [];
+  if (!blocks.length && !scenSets.length) return;
+
+  // ── Section divider ──
+  {
+    const s = newSlide();
+    s.background = { color: C.ink };
+    s.addText("Scenarios & Risk", { x: 0.7, y: 3.0, w: W - 1.4, h: 0.9, fontSize: 32, bold: true, color: "FFFFFF" });
+    s.addText("Scored risk matrix · bull / base / bear · falsification", { x: 0.7, y: 3.95, w: W - 1.4, h: 0.5, fontSize: 15, color: "C7D2FE" });
+  }
+
+  // ── Scored risk matrices (one slide per scope, top ~7 risks) ──
+  for (const b of blocks) {
+    if (!b.risks.length) continue;
+    const s = newSlide();
+    heading(s, `Risk Matrix — ${b.label}`, "Likelihood × Impact (1–5); sorted by score");
+    const header: PptxGenJS.TableRow = ["Risk", "Category", "L", "I", "Score", "Trigger / Evidence"].map((t) => ({
+      text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 },
+    }));
+    const rows: PptxGenJS.TableRow[] = [header, ...b.risks.slice(0, 7).map((r) => [
+      { text: String(r.title), options: { fontSize: 10, color: C.body } },
+      { text: String(r.category), options: { fontSize: 10, color: C.muted } },
+      { text: String(r.likelihood), options: { fontSize: 10, color: C.body, align: "center" as const } },
+      { text: String(r.impact), options: { fontSize: 10, color: C.body, align: "center" as const } },
+      { text: String(r.score), options: { fontSize: 11, bold: true, color: "111111", fill: { color: scoreFill(r.score) }, align: "center" as const } },
+      { text: `${r.trigger}${r.evidence ? ` — ${r.evidence}` : ""}`, options: { fontSize: 9, color: C.muted } },
+    ])];
+    s.addTable(rows, { x: 0.4, y: 1.7, w: W - 0.8, colW: [3.0, 1.3, 0.5, 0.5, 0.8, 5.4], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+    s.addNotes(`Top risks for ${b.label}: ${b.risks.slice(0, 3).map((r) => `${r.title} (score ${r.score})`).join("; ")}.`);
+  }
+
+  // ── Bull/Base/Bear scenario tables (prefer note's structured sets; else risk blocks) ──
+  const scopesFromSets = scenSets.map((ss) => ({
+    label: ss.scope === "portfolio" ? "Portfolio" : ss.scope,
+    scenarios: ss.scenarios,
+    falsification: ss.falsification,
+  }));
+  const scopesFromRisk = blocks
+    .filter((b) => b.scenarios.length)
+    .map((b) => ({ label: b.label, scenarios: b.scenarios, falsification: b.falsification }));
+  // De-dup by label, preferring the note's structured sets.
+  const seen = new Set(scopesFromSets.map((s) => s.label.toLowerCase()));
+  const scenScopes = [...scopesFromSets, ...scopesFromRisk.filter((s) => !seen.has(s.label.toLowerCase()))];
+
+  for (const sc of scenScopes) {
+    if (!sc.scenarios.length) continue;
+    const s = newSlide();
+    heading(s, `Scenarios — ${sc.label}`, "Bull / Base / Bear");
+    const header: PptxGenJS.TableRow = ["Scenario", "Prob", "Narrative", "Triggers / Key drivers"].map((t) => ({
+      text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 },
+    }));
+    const rows: PptxGenJS.TableRow[] = [header, ...sc.scenarios.map((sn) => [
+      { text: sn.label.toUpperCase(), options: { fontSize: 11, bold: true, color: SCEN_COLOR[sn.label] ?? C.body } },
+      { text: sn.probability != null ? `${sn.probability}%` : "—", options: { fontSize: 10, color: C.body, align: "center" as const } },
+      { text: String(sn.narrative), options: { fontSize: 9, color: C.body } },
+      { text: [...(sn.triggers ?? []), ...(sn.keyDrivers ?? [])].join("; "), options: { fontSize: 9, color: C.muted } },
+    ])];
+    s.addTable(rows, { x: 0.4, y: 1.7, w: W - 0.8, colW: [1.4, 0.9, 5.3, 4.9], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+    if (sc.falsification?.length) {
+      s.addText("Falsification — thesis is wrong if:", { x: 0.4, y: H - 1.7, w: W - 0.8, h: 0.3, fontSize: 11, bold: true, color: C.negative });
+      s.addText(sc.falsification.slice(0, 4).map((f) => ({ text: String(f), options: { bullet: true, fontSize: 10, color: C.body } })), { x: 0.4, y: H - 1.4, w: W - 0.8, h: 1.1, valign: "top", paraSpaceAfter: 2 });
+    }
+    s.addNotes(`Scenarios for ${sc.label}. Bear case reflects the red-team panel's strongest objections.`);
+  }
+}
+
 export async function renderPptx(model: DocModel): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "W", width: 13.333, height: 7.5 });
@@ -211,6 +303,9 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
     bodySlides(sec.heading, SUBS[sec.key], sec.body, sec.body.slice(0, 700));
     if (sec.key === "cross_asset_flows") figureSlide(findFig("crossasset"), "Cross-Asset Levels");
   }
+
+  // ════════════════ 5b. SCENARIOS & RISK (Gap E) ════════════════
+  renderScenarioRiskSection(pptx, model, { newSlide, heading, W, H });
 
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {

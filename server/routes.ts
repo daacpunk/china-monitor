@@ -518,6 +518,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/equity/risk-dashboard?themes=semi,ev — scored risks + bull/base/bear scenarios (Gap E) */
+  app.get("/api/equity/risk-dashboard", async (req, res) => {
+    try {
+      const { buildRiskDashboard } = await import("./equity/riskDashboard");
+      const themesParam = String(req.query.themes || "").trim();
+      const themes = themesParam ? (themesParam.split(",").map((s) => s.trim()) as any[]) : undefined;
+      const dashboard = await buildRiskDashboard(themes);
+      res.json(dashboard);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {

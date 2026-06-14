@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Cpu, Car, BatteryCharging, Microchip, Bot, ShoppingBag,
   ChevronDown, ChevronRight, ExternalLink, Loader2, TrendingUp,
-  TrendingDown, Minus, Newspaper,
+  TrendingDown, Minus, Newspaper, ShieldAlert,
 } from "lucide-react";
 
 type ThemeId = "tech" | "ev" | "battery" | "semi" | "ai" | "consumer";
@@ -65,6 +65,49 @@ interface Catalyst {
   url: string;
   impact: "positive" | "negative" | "neutral";
 }
+interface Risk {
+  id: string;
+  title: string;
+  category: string;
+  likelihood: number;
+  impact: number;
+  score: number;
+  trigger: string;
+  evidence: string;
+  mitigants: string;
+}
+interface Scenario {
+  label: "bull" | "base" | "bear";
+  narrative: string;
+  triggers: string[];
+  probability: number | null;
+  keyDrivers: string[];
+}
+interface RiskBlock {
+  scope: string;
+  label: string;
+  risks: Risk[];
+  scenarios: Scenario[];
+  falsification: string[];
+  notes: string[];
+}
+interface RiskDashboard {
+  generatedAt: string;
+  themes: string[];
+  portfolio: RiskBlock;
+  blocks: RiskBlock[];
+}
+
+function scoreTone(score: number): string {
+  if (score >= 16) return "bg-red-500/10 text-red-700 dark:text-red-300";
+  if (score >= 9) return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  return "bg-green-500/10 text-green-700 dark:text-green-300";
+}
+const SCEN_TONE: Record<string, string> = {
+  bull: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  base: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
+  bear: "bg-red-500/10 text-red-700 dark:text-red-300",
+};
 
 const THEME_ICON: Record<ThemeId, any> = {
   tech: Cpu, ev: Car, battery: BatteryCharging, semi: Microchip, ai: Bot, consumer: ShoppingBag,
@@ -237,9 +280,70 @@ function NameRow({ name, themeId }: { name: SectorName; themeId: ThemeId }) {
   );
 }
 
+/** Risk + bull/base/bear chips for a scope (theme or portfolio). */
+function RiskPanel({ block }: { block: RiskBlock }) {
+  const bull = block.scenarios.find((s) => s.label === "bull");
+  const base = block.scenarios.find((s) => s.label === "base");
+  const bear = block.scenarios.find((s) => s.label === "bear");
+  return (
+    <div className="space-y-3">
+      {block.risks.length > 0 && (
+        <div>
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <ShieldAlert className="h-3.5 w-3.5" /> Top risks (likelihood × impact)
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {block.risks.slice(0, 6).map((r) => (
+              <Badge key={r.id} variant="outline" className={`text-[10px] ${scoreTone(r.score)}`} title={`${r.trigger}${r.evidence ? ` — ${r.evidence}` : ""}${r.mitigants ? ` | Mitigants: ${r.mitigants}` : ""}`}>
+                {r.title} <span className="ml-1 opacity-70">{r.category} L{r.likelihood}×I{r.impact}={r.score}</span>
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+      {block.scenarios.length > 0 && (
+        <div>
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Scenarios · bull / base / bear</div>
+          <div className="flex flex-wrap gap-2">
+            {[bull, base, bear].filter(Boolean).map((sc) => (
+              <div key={sc!.label} className={`min-w-[180px] flex-1 rounded-md border p-2 ${SCEN_TONE[sc!.label]}`} title={[...(sc!.triggers ?? []), ...(sc!.keyDrivers ?? [])].join("; ")}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase">{sc!.label}</span>
+                  {sc!.probability != null && <span className="text-[10px] opacity-80">{sc!.probability}%</span>}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-foreground/90 line-clamp-3">{sc!.narrative}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {block.falsification.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Falsification · thesis wrong if</div>
+          <ul className="list-disc pl-4 text-[11px] text-muted-foreground">
+            {block.falsification.slice(0, 4).map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+        </div>
+      )}
+      {block.notes.length > 0 && block.risks.length === 0 && block.scenarios.length === 0 && (
+        <div className="text-[11px] text-muted-foreground">{block.notes.join(" ")}</div>
+      )}
+    </div>
+  );
+}
+
 function ThemeCard({ theme }: { theme: SectorTheme }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = THEME_ICON[theme.id];
+
+  // Scenario & Risk (Gap E): per-theme scored risks + bull/base/bear, lazy on expand.
+  const riskQuery = useQuery<RiskDashboard, Error>({
+    queryKey: [`/api/equity/risk-dashboard`, theme.id],
+    queryFn: async () => (await apiRequest("GET", `/api/equity/risk-dashboard?themes=${theme.id}`)).json(),
+    enabled: expanded,
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+  const riskBlock = riskQuery.data?.blocks?.find((b) => b.scope === theme.id) ?? riskQuery.data?.blocks?.[0];
   return (
     <Card className="overflow-hidden" data-testid={`theme-${theme.id}`}>
       <button onClick={() => setExpanded(!expanded)} className="flex w-full items-start gap-3 p-4 text-left hover:bg-muted/30">
@@ -261,6 +365,17 @@ function ThemeCard({ theme }: { theme: SectorTheme }) {
       </button>
       {expanded && (
         <div className="border-t">
+          <div className="border-b bg-muted/20 p-3" data-testid={`risk-${theme.id}`}>
+            {riskQuery.isLoading ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating scenario & risk framing (LLM, red-team grounded)…
+              </div>
+            ) : riskQuery.error ? (
+              <div className="text-xs text-red-600 dark:text-red-400">Risk framing unavailable: {riskQuery.error.message}</div>
+            ) : riskBlock ? (
+              <RiskPanel block={riskBlock} />
+            ) : null}
+          </div>
           {theme.names.map((n) => (
             <NameRow key={`${n.market}:${n.symbol}`} name={n} themeId={theme.id} />
           ))}
@@ -283,6 +398,7 @@ export default function Sectors() {
         subtitle="Top-down themes → single names across tech, EV, battery, semis, AI, and consumer. Expand a theme to drill into constituents, valuation (AKShare), and live catalysts (Sonar Pro)."
       />
       <ProductTradePanel />
+      <PortfolioRiskPanel />
       {isLoading ? (
         <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
       ) : error ? (
@@ -293,6 +409,44 @@ export default function Sectors() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Portfolio-level scenario & risk summary (Gap E) — LLM-generated, on demand. */
+function PortfolioRiskPanel() {
+  const [open, setOpen] = useState(false);
+  const q = useQuery<RiskDashboard, Error>({
+    queryKey: ["/api/equity/risk-dashboard", "portfolio"],
+    queryFn: async () => (await apiRequest("GET", "/api/equity/risk-dashboard")).json(),
+    enabled: open,
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+
+  return (
+    <Card className="mb-4 p-4" data-testid="card-portfolio-risk">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <ShieldAlert className="h-4 w-4 text-primary" /> Portfolio scenario & risk
+          <Badge variant="outline" className="text-[9px] bg-violet-500/10 text-violet-700 dark:text-violet-300">LLM · red-team</Badge>
+        </div>
+        <Button size="sm" variant="outline" className="h-6 text-[11px] gap-1" onClick={() => setOpen((v) => !v)}>
+          {open ? "Hide" : "Generate"}
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-3">
+          {q.isLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building portfolio-level scored risks + bull/base/bear across all themes…
+            </div>
+          ) : q.error ? (
+            <div className="text-xs text-red-600 dark:text-red-400">Unavailable: {q.error.message}</div>
+          ) : q.data?.portfolio ? (
+            <RiskPanel block={q.data.portfolio} />
+          ) : null}
+        </div>
+      )}
+    </Card>
   );
 }
 
