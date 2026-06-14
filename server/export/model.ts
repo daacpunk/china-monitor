@@ -12,6 +12,7 @@ import { renderLineChart, renderBarChart, renderDonut, type ChartSeries } from "
 import { buildRiskDashboard, type RiskBlock } from "../equity/riskDashboard";
 import { buildFlowsPositioning, type FlowsPositioning } from "../equity/flowsPositioning";
 import { buildEarningsContext, type NameEarningsContext } from "../equity/earningsContext";
+import { buildPolicyTransmission, type PolicyTransmissionChain } from "../equity/policyTransmission";
 import type { ScenarioSet } from "../report/strategyNote";
 import type { CoverageTheme } from "../equity/universe";
 
@@ -59,6 +60,9 @@ export interface DocModel {
   // Fundamentals (Gap B): per-name revenue/net-profit YoY + EPS + earnings
   // momentum + cheap/improving quadrant, for the deck FUNDAMENTALS slide.
   earningsContext?: NameEarningsContext[];
+  // Policy transmission (Gap D): policy → affected theme(s) → live evidence →
+  // ranked named beneficiaries/at-risk chains, for the deck TRANSMISSION slide.
+  policyTransmission?: PolicyTransmissionChain[];
 }
 
 function fnum(n: any, d = 1): string {
@@ -177,6 +181,15 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     /* fundamentals are best-effort; deck still renders without them */
   }
 
+  // Policy transmission (Gap D) for the dedicated deck TRANSMISSION slide.
+  let policyTransmission: PolicyTransmissionChain[] | undefined;
+  try {
+    const pt = await buildPolicyTransmission({ maxChains: 5 });
+    policyTransmission = pt.chains.length ? pt.chains : undefined;
+  } catch {
+    /* transmission is best-effort; deck still renders without it */
+  }
+
   return {
     title: note.title,
     asOfDate: note.asOfDate,
@@ -204,6 +217,7 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     riskBlocks,
     flowsPositioning,
     earningsContext,
+    policyTransmission,
   };
 }
 

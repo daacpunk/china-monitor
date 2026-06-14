@@ -285,6 +285,103 @@ function renderFundamentalsSection(
   );
 }
 
+// Transmission strength → badge color.
+const STRENGTH_COLOR: Record<string, string> = {
+  strong: C.positive,
+  moderate: C.warn,
+  weak: C.muted,
+};
+
+/**
+ * Dedicated "Policy Transmission" deck section (Gap D): one slide per policy
+ * chain (paginated 2/slide) showing Policy → affected theme(s) → live evidence
+ * → ranked beneficiaries / at-risk, plus an LLM read-through + strength badge.
+ */
+function renderTransmissionSection(
+  pptx: PptxGenJS,
+  model: DocModel,
+  io: { newSlide: (withFooter?: boolean) => PptxGenJS.Slide; heading: (s: PptxGenJS.Slide, title: string, sub?: string) => void; W: number; H: number },
+): void {
+  const chains = model.policyTransmission ?? [];
+  if (!chains.length) return;
+  const { newSlide, heading, W, H } = io;
+  const perSlide = 2;
+
+  for (let i = 0; i < chains.length; i += perSlide) {
+    const s = newSlide();
+    heading(s, i === 0 ? "Policy Transmission" : "Policy Transmission (cont.)", i === 0 ? "Policy → sector → name: live evidence + named beneficiaries" : undefined);
+    const group = chains.slice(i, i + perSlide);
+    const blockH = (H - 2.0) / perSlide;
+    group.forEach((c, j) => {
+      const y0 = 1.8 + j * blockH;
+      const strength = c.transmissionStrength;
+      // Policy headline + strength badge
+      s.addText(
+        [
+          { text: `${c.policy.source}: `, options: { bold: true, fontSize: 12, color: ACCENT } },
+          { text: c.policy.title, options: { fontSize: 12, color: C.ink } },
+          ...(strength ? [{ text: `   [${strength}]`, options: { bold: true, fontSize: 11, color: STRENGTH_COLOR[strength] ?? C.muted } }] : []),
+        ],
+        { x: 0.5, y: y0, w: W - 1, h: 0.35, valign: "middle" },
+      );
+      // Themes → beneficiaries line
+      const themes = c.affectedThemes.join(" / ") + (c.marketWide ? " (market-wide)" : "");
+      const ben = c.beneficiaries.slice(0, 4).map((b) => `${b.nameEn}${b.quadrant ? ` (${b.quadrant})` : ""}`).join(", ") || "n/a";
+      s.addText(
+        [
+          { text: `Themes: `, options: { bold: true, fontSize: 10, color: C.muted } },
+          { text: themes, options: { fontSize: 10, color: C.body } },
+          { text: `   →  Beneficiaries: `, options: { bold: true, fontSize: 10, color: C.positive } },
+          { text: ben, options: { fontSize: 10, color: C.body } },
+        ],
+        { x: 0.5, y: y0 + 0.38, w: W - 1, h: 0.32, valign: "middle" },
+      );
+      // At-risk (if any)
+      let yEv = y0 + 0.72;
+      if (c.atRisk.length) {
+        s.addText(
+          [
+            { text: `At-risk: `, options: { bold: true, fontSize: 10, color: C.negative } },
+            { text: c.atRisk.slice(0, 3).map((b) => `${b.nameEn}${b.quadrant ? ` (${b.quadrant})` : ""}`).join(", "), options: { fontSize: 10, color: C.body } },
+          ],
+          { x: 0.5, y: yEv, w: W - 1, h: 0.3, valign: "middle" },
+        );
+        yEv += 0.32;
+      }
+      // Evidence legs (compact)
+      const evLines = c.evidence
+        .map((e) => {
+          const legs = [e.tradeSignal, e.valuationNote, e.earningsNote].filter(Boolean).join(" · ");
+          return legs ? `${e.label}: ${legs}` : null;
+        })
+        .filter(Boolean)
+        .slice(0, 2) as string[];
+      if (evLines.length) {
+        s.addText(`Evidence — ${evLines.join("  |  ")}`, { x: 0.5, y: yEv, w: W - 1, h: 0.3, fontSize: 9, italic: true, color: C.muted, valign: "top" });
+        yEv += 0.3;
+      }
+      // Read-through narrative
+      if (c.readThrough) {
+        s.addText(c.readThrough, { x: 0.5, y: yEv, w: W - 1, h: blockH - (yEv - y0) - 0.1, fontSize: 10, color: C.body, valign: "top", lineSpacingMultiple: 1.1 });
+      }
+    });
+  }
+
+  // Footnote: deterministic skeleton + thin LLM synthesis.
+  const s2 = newSlide();
+  heading(s2, "Policy Transmission — Method");
+  s2.addText(
+    "Each chain is assembled deterministically: a recent policy item is mapped to affected coverage theme(s) (from its tags + the issuing channel's default themes), " +
+    "crossed with live evidence — customs/trade YoY, Gap A valuation percentiles, and Gap B earnings momentum — and the affected themes' featured A-share names are ranked " +
+    "by the cheap+improving quadrant (cheap-improving = strongest beneficiary; expensive-deteriorating = at-risk). The model adds only the transmission-strength rating and the " +
+    "read-through narrative, grounded in that skeleton; it does not introduce new data or names.",
+    { x: 0.5, y: 1.8, w: W - 1, h: 2.0, fontSize: 12, color: C.body, valign: "top", lineSpacingMultiple: 1.15 },
+  );
+  s2.addNotes(
+    chains.map((c) => `${c.policy.source}: ${c.policy.title} → ${c.affectedThemes.join("/")} → ${c.beneficiaries.map((b) => b.nameEn).join(", ") || "n/a"}${c.transmissionStrength ? ` [${c.transmissionStrength}]` : ""}. ${c.readThrough ?? ""}`).join(" "),
+  );
+}
+
 export async function renderPptx(model: DocModel): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "W", width: 13.333, height: 7.5 });
@@ -461,6 +558,9 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
 
   // ════════════════ 5d. FUNDAMENTALS (Gap B) ════════════════
   renderFundamentalsSection(pptx, model, { newSlide, heading, W, H });
+
+  // ════════════════ 5e. POLICY TRANSMISSION (Gap D) ════════════════
+  renderTransmissionSection(pptx, model, { newSlide, heading, W, H });
 
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {

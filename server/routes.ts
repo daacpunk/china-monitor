@@ -558,6 +558,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/equity/policy-transmission — policy → sector → name transmission chains (Gap D).
+   *  Deterministic skeleton (policy → affected themes → live evidence → ranked beneficiaries/at-risk)
+   *  + LLM-assigned strength + read-through. ?refresh=1 (or ?nocache=1) bypasses the 6h cache. */
+  app.get("/api/equity/policy-transmission", async (req, res) => {
+    try {
+      const { buildPolicyTransmission } = await import("./equity/policyTransmission");
+      const forceRefresh = req.query.refresh === "1" || req.query.nocache === "1";
+      const transmission = await buildPolicyTransmission({ forceRefresh });
+      res.json(transmission);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {

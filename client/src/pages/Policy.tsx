@@ -17,6 +17,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu } from "@/components/ExportMenu";
+import { PolicyTransmissionPanel } from "@/components/PolicyTransmissionPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -224,6 +225,9 @@ export default function Policy() {
           {filtered.length} {filtered.length === 1 ? "update" : "updates"}
         </div>
       </div>
+
+      {/* Policy → sector → name transmission (Gap D) */}
+      <PolicyTransmissionPanel />
 
       {/* Feed */}
       {feedQuery.isLoading ? (

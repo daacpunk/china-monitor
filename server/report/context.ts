@@ -24,6 +24,7 @@ import { buildValuationContext, valuationContextLine } from "../equity/valuation
 import { buildEarningsContext, earningsContextLine } from "../equity/earningsContext";
 import { buildRiskDashboard, riskDashboardDigest } from "../equity/riskDashboard";
 import { buildFlowsPositioning, flowsPositioningLine } from "../equity/flowsPositioning";
+import { buildPolicyTransmission, policyTransmissionDigest } from "../equity/policyTransmission";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -204,7 +205,21 @@ async function sectorDigest(
   } catch {
     /* skip flows & positioning on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock;
+  // POLICY TRANSMISSION (Gap D): for the top recent policy items, an explicit
+  // policy → affected theme(s) → live evidence (trade/valuation/earnings) →
+  // ranked named beneficiaries/at-risk chain, with an LLM strength + read-through.
+  // Synthesis/structuring layer over existing signals; degrades gracefully.
+  let transmissionBlock = "";
+  try {
+    const pt = await buildPolicyTransmission();
+    const digest = policyTransmissionDigest(pt);
+    if (digest.trim()) {
+      transmissionBlock = `\nPOLICY TRANSMISSION (policy → affected theme(s) → live evidence → ranked beneficiaries/at-risk; LLM strength + read-through):\n${digest}`;
+    }
+  } catch {
+    /* skip policy transmission on failure */
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock;
 }
 
 async function sonarDigest(

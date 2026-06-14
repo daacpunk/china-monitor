@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
+import { PolicyTransmissionPanel } from "@/components/PolicyTransmissionPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -505,6 +506,7 @@ export default function Sectors() {
       />
       <ProductTradePanel />
       <FlowsPositioningPanel />
+      <PolicyTransmissionPanel compact />
       <PortfolioRiskPanel />
       {isLoading ? (
         <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
