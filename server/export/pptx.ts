@@ -382,6 +382,106 @@ function renderTransmissionSection(
   );
 }
 
+// RELATIVE & GLOBAL CONTEXT (Gap F): AH premium gauge + China index returns vs
+// the US-rate / USD/CNY backdrop + LLM top-down stance. Single compact slide;
+// skips cleanly when there is no relative-context data.
+const STANCE_COLOR: Record<string, string> = {
+  constructive: C.positive,
+  neutral: C.muted,
+  cautious: C.negative,
+};
+
+function renderRelativeContextSection(
+  pptx: PptxGenJS,
+  model: DocModel,
+  io: { newSlide: (withFooter?: boolean) => PptxGenJS.Slide; heading: (s: PptxGenJS.Slide, title: string, sub?: string) => void; W: number; H: number },
+): void {
+  const r = model.relativeContext;
+  if (!r) return;
+  const haveAny = !!(r.ahPremium || r.indexReturns.length || r.crossAsset);
+  if (!haveAny) return;
+  const { newSlide, heading, W, H } = io;
+  const pct = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v) ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+  const s = newSlide();
+  heading(s, "Relative & Global Context", "AH premium · China returns vs rate/FX backdrop · top-down stance");
+
+  // Stance badge + whyChina narrative.
+  if (r.stance) {
+    s.addText(
+      `Stance: ${r.stance.toUpperCase()}`,
+      { x: 0.5, y: 1.65, w: W - 1, h: 0.4, fontSize: 16, bold: true, color: STANCE_COLOR[r.stance] ?? C.body, valign: "middle" },
+    );
+  }
+  if (r.whyChina) {
+    s.addText(r.whyChina, { x: 0.5, y: 2.1, w: W - 1, h: 0.9, fontSize: 12, color: C.body, valign: "top", lineSpacingMultiple: 1.12 });
+  }
+
+  // China index returns table (left) + cross-asset + AH premium (right).
+  const yTbl = 3.15;
+  if (r.indexReturns.length) {
+    const rows: PptxGenJS.TableRow[] = [
+      ["Index", "YTD", "12m"].map((t) => ({ text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 } })) as PptxGenJS.TableRow,
+    ];
+    for (const ir of r.indexReturns) {
+      rows.push([
+        { text: ir.index, options: { fontSize: 10, color: C.body } },
+        { text: pct(ir.ytdPct), options: { fontSize: 10, color: (ir.ytdPct ?? 0) >= 0 ? C.positive : C.negative } },
+        { text: pct(ir.ret12mPct), options: { fontSize: 10, color: (ir.ret12mPct ?? 0) >= 0 ? C.positive : C.negative } },
+      ]);
+    }
+    s.addText("China equity returns", { x: 0.5, y: yTbl - 0.35, w: 6, h: 0.3, fontSize: 12, bold: true, color: C.body });
+    s.addTable(rows, { x: 0.5, y: yTbl, w: 6.0, colW: [3.0, 1.5, 1.5], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+  }
+
+  // Right column: AH premium + cross-asset backdrop.
+  const xR = 7.0, wR = W - xR - 0.5;
+  let yR = yTbl - 0.35;
+  if (r.ahPremium?.aggregatePremiumPct != null) {
+    const ah = r.ahPremium;
+    s.addText("AH premium (A vs H, median)", { x: xR, y: yR, w: wR, h: 0.3, fontSize: 12, bold: true, color: C.body });
+    yR += 0.35;
+    s.addText(
+      [
+        { text: `${ah.aggregatePremiumPct!.toFixed(1)}%`, options: { bold: true, fontSize: 18, color: C.body } },
+        { text: `  ${ah.level ?? "n/a"} · ${ah.pairCount ?? "?"} pairs`, options: { fontSize: 11, color: C.muted } },
+      ],
+      { x: xR, y: yR, w: wR, h: 0.45, valign: "middle" },
+    );
+    yR += 0.6;
+  }
+  if (r.crossAsset) {
+    const c = r.crossAsset;
+    s.addText("Cross-asset backdrop", { x: xR, y: yR, w: wR, h: 0.3, fontSize: 12, bold: true, color: C.body });
+    yR += 0.35;
+    const caRows: PptxGenJS.TableRow[] = [];
+    if (c.usdCny != null) caRows.push([
+      { text: "USD/CNY", options: { fontSize: 10, color: C.body } },
+      { text: `${c.usdCny.toFixed(3)}${c.usdCnyDate ? ` (${c.usdCnyDate})` : ""}`, options: { fontSize: 10, color: C.muted } },
+    ]);
+    if (c.usCn10yDiff != null) caRows.push([
+      { text: "US-CN 10Y diff", options: { fontSize: 10, color: C.body } },
+      { text: `${c.usCn10yDiff > 0 ? "+" : ""}${c.usCn10yDiff.toFixed(2)}pp (US ${c.us10y != null ? c.us10y.toFixed(2) : "n/a"} / CN ${c.cn10y != null ? c.cn10y.toFixed(2) : "n/a"})`, options: { fontSize: 10, color: C.muted } },
+    ]);
+    if (caRows.length) {
+      s.addTable(caRows, { x: xR, y: yR, w: wR, colW: [1.8, wR - 1.8], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+    }
+  }
+
+  // Drivers banner.
+  if (r.drivers.length) {
+    s.addText("Drivers:", { x: 0.5, y: H - 1.05, w: W - 1, h: 0.3, fontSize: 11, bold: true, color: C.warn });
+    s.addText(r.drivers.slice(0, 3).join(" · "), { x: 0.5, y: H - 0.75, w: W - 1, h: 0.4, fontSize: 10, color: C.body, valign: "top" });
+  }
+
+  s.addNotes(
+    `Relative & global context stance: ${r.stance ?? "n/a"}. ${r.whyChina}` +
+    `${r.drivers.length ? ` Drivers: ${r.drivers.join("; ")}.` : ""}` +
+    `${r.notes.length ? ` Notes: ${r.notes.join(" ")}` : ""}`,
+  );
+}
+
 export async function renderPptx(model: DocModel): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "W", width: 13.333, height: 7.5 });
@@ -561,6 +661,9 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
 
   // ════════════════ 5e. POLICY TRANSMISSION (Gap D) ════════════════
   renderTransmissionSection(pptx, model, { newSlide, heading, W, H });
+
+  // ════════════════ 5f. RELATIVE & GLOBAL CONTEXT (Gap F) ════════════════
+  renderRelativeContextSection(pptx, model, { newSlide, heading, W, H });
 
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {

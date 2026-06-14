@@ -350,6 +350,80 @@ export async function getAkshareMacro(
   }
 }
 
+// ─── Relative & global context (Gap F: AH premium / cross-asset yields) ──────
+
+/** One dual-listed (AH) name's A-vs-H premium. */
+export interface AhPremiumPair {
+  name: string | null;
+  code: string | null;
+  premium_pct: number | null;
+}
+
+/** AH premium aggregate snapshot across dual-listed names. */
+export interface AhPremiumSnapshot {
+  aggregate_premium_pct: number | null; // median across pairs
+  pair_count: number | null;
+  top_premium: AhPremiumPair[];
+  bottom_premium: AhPremiumPair[];
+  note: string | null;
+  as_of: string | null;
+}
+
+/** A-vs-H premium for dual-listed names (median across pairs + top/bottom). */
+export async function getAhPremium(): Promise<{ data: AhPremiumSnapshot | null; error?: string }> {
+  try {
+    const r = await getJson<AhPremiumSnapshot & { source?: string }>(`/relative/ah_premium`, 45_000);
+    if (r == null || (r.aggregate_premium_pct == null && (r.pair_count ?? 0) === 0)) {
+      return { data: null, error: "AH premium empty" };
+    }
+    return {
+      data: {
+        aggregate_premium_pct: r.aggregate_premium_pct ?? null,
+        pair_count: r.pair_count ?? null,
+        top_premium: r.top_premium ?? [],
+        bottom_premium: r.bottom_premium ?? [],
+        note: r.note ?? null,
+        as_of: r.as_of ?? null,
+      },
+    };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+}
+
+/** One daily China-vs-US treasury yield-curve point (percent yields). */
+export interface CrossAssetYieldPoint {
+  date: string;
+  cn_2y: number | null;
+  cn_5y: number | null;
+  cn_10y: number | null;
+  cn_30y: number | null;
+  cn_10y_2y: number | null;
+  us_2y: number | null;
+  us_5y: number | null;
+  us_10y: number | null;
+  us_30y: number | null;
+  us_10y_2y: number | null;
+  us_cn_10y_diff: number | null; // us_10y - cn_10y (CNY-pressure gauge)
+}
+
+/** China-vs-US treasury yield curve daily history + latest snapshot. */
+export async function getCrossAssetYields(
+  start = "2025-01-01",
+  limit = 260,
+): Promise<{ data: CrossAssetYieldPoint[]; latest: CrossAssetYieldPoint | null; error?: string }> {
+  try {
+    const qs = new URLSearchParams({ start, limit: String(limit) });
+    const r = await getJson<{ data: CrossAssetYieldPoint[]; latest?: CrossAssetYieldPoint | null }>(
+      `/relative/yields?${qs}`,
+      45_000,
+    );
+    return { data: r.data ?? [], latest: r.latest ?? null };
+  } catch (err: any) {
+    return { data: [], latest: null, error: err.message };
+  }
+}
+
 /** Health check — useful for debug routes / startup probe. */
 export async function getAkshareHealth(): Promise<{ ok: boolean; detail: any }> {
   try {

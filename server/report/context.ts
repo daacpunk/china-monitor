@@ -25,6 +25,7 @@ import { buildEarningsContext, earningsContextLine } from "../equity/earningsCon
 import { buildRiskDashboard, riskDashboardDigest } from "../equity/riskDashboard";
 import { buildFlowsPositioning, flowsPositioningLine } from "../equity/flowsPositioning";
 import { buildPolicyTransmission, policyTransmissionDigest } from "../equity/policyTransmission";
+import { buildRelativeContext, relativeContextDigest } from "../equity/relativeContext";
 import { querySonar } from "../clients/sonar";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
@@ -219,7 +220,21 @@ async function sectorDigest(
   } catch {
     /* skip policy transmission on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock;
+
+  // Relative & global context (Gap F): the top-down call — AH premium, China
+  // index YTD/12m returns, USD/CNY + US-China 10Y differential, with an LLM
+  // stance + whyChina. Recombines existing series; degrades gracefully.
+  let relativeBlock = "";
+  try {
+    const rc = await buildRelativeContext();
+    const digest = relativeContextDigest(rc);
+    if (digest.trim()) {
+      relativeBlock = `\nRELATIVE CONTEXT (AH premium + China index returns + USD/CNY + US-China 10Y differential; LLM stance + whyChina):\n${digest}`;
+    }
+  } catch {
+    /* skip relative context on failure */
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock + relativeBlock;
 }
 
 async function sonarDigest(

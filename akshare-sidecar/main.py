@@ -1379,6 +1379,201 @@ def flows_margin(
     return out
 
 
+# ─── Relative & global context (Gap F: AH premium / cross-asset yields) ──────
+@app.get("/relative/ah_premium")
+def relative_ah_premium(
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """A-share vs H-share premium for dual-listed (AH) names via ak.stock_zh_ah_spot.
+
+    The AKShare AH spot frame carries, per dual-listed pair, the A-share latest
+    price, the H-share latest price (HKD), and a precomputed premium ratio (比价).
+    Column names are Chinese and have varied across AKShare versions, so we probe
+    by substring rather than assume an exact schema:
+      代码/名称, 最新价 (A latest), H股-最新价 / H股价 (H latest, HKD),
+      比价 (A/H price ratio), 溢价 / 溢价率 (premium %), 涨跌幅.
+    Returns the median premium across pairs (honest aggregate), pair count, and
+    the top / bottom names by premium. A `note` records the formula actually used.
+    """
+    require_auth(x_akshare_token)
+    key = ("relative_ah_premium",)
+
+    def fetch():
+        t0 = time.time()
+        df = call_with_retry(lambda: ak.stock_zh_ah_spot(), attempts=2)
+        log.info("stock_zh_ah_spot rows=%d in %.2fs",
+                 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return {}
+        find = _col_finder(df)
+        code_col = find("代码")
+        name_col = find("名称")
+        # Precomputed premium % column if AKShare provides one.
+        prem_col = find("溢价率", "溢价")
+        # Otherwise derive from the A/H price ratio (比价) or raw A & H prices.
+        ratio_col = find("比价")
+        a_price_col = find("最新价")
+        h_price_col = find("H股-最新价", "H股价", "H股最新价", "H股")
+
+        pairs: List[Dict[str, Any]] = []
+        note_formula = None
+        for _, r in df.iterrows():
+            name = (str(r[name_col]).strip() if name_col else None)
+            code = (str(r[code_col]).strip() if code_col else None)
+            premium = None
+            if prem_col:
+                premium = _num_cell(r, prem_col)
+                note_formula = note_formula or f"premium from AKShare '{prem_col}' column (percent)"
+            if premium is None and ratio_col:
+                # 比价 is the A/H price ratio; premium % = (ratio - 1) * 100.
+                ratio = _num_cell(r, ratio_col)
+                if ratio is not None and ratio > 0:
+                    premium = (ratio - 1.0) * 100.0
+                    note_formula = note_formula or f"premium = ('{ratio_col}' A/H ratio - 1) x 100"
+            if premium is None and a_price_col and h_price_col:
+                a_px = _num_cell(r, a_price_col)
+                h_px = _num_cell(r, h_price_col)
+                # H price is in HKD; without an FX leg this ratio overstates the
+                # premium by the HKD->CNY rate (~0.91). We flag that in the note.
+                if a_px is not None and h_px is not None and h_px > 0:
+                    premium = (a_px / h_px - 1.0) * 100.0
+                    note_formula = note_formula or (
+                        f"premium = ('{a_price_col}' / '{h_price_col}' - 1) x 100; "
+                        "H price is HKD (no FX conversion applied)")
+            if premium is None or not isinstance(premium, (int, float)):
+                continue
+            premium = _flows_jsonsafe(float(premium))
+            if premium is None:
+                continue
+            pairs.append({"name": name, "code": code, "premium_pct": round(premium, 2)})
+
+        if not pairs:
+            return {}
+        prems = sorted(p["premium_pct"] for p in pairs)
+        n = len(prems)
+        median = prems[n // 2] if n % 2 == 1 else (prems[n // 2 - 1] + prems[n // 2]) / 2.0
+        by_prem = sorted(pairs, key=lambda p: p["premium_pct"], reverse=True)
+        return {
+            "aggregate_premium_pct": round(median, 2),
+            "pair_count": n,
+            "top_premium": by_prem[:8],
+            "bottom_premium": list(reversed(by_prem[-8:])),
+            "note": note_formula or "premium computed per available columns",
+            "as_of": datetime.utcnow().isoformat() + "Z",
+        }
+
+    try:
+        result = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("relative_ah_premium failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    payload = {
+        "source": "akshare",
+        "endpoint": "stock_zh_ah_spot",
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+    payload.update(result or {})
+    return payload
+
+
+@app.get("/relative/yields")
+def relative_yields(
+    start: Optional[str] = Query(None, description="YYYY-MM-DD; default 2025-01-01"),
+    limit: int = Query(260, description="Recent rows to return (most recent N)"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """China vs US treasury yield curve via ak.bond_zh_us_rate.
+
+    Source cols (Chinese): 日期, 中国国债收益率2年/5年/10年/30年,
+    中国国债收益率10年-2年, 美国国债收益率2年/5年/10年/30年, 美国国债收益率10年-2年.
+    We map to ASCII keys, add a computed us_cn_10y_diff (US 10y - CN 10y) per row
+    (a CNY-pressure gauge), and return the recent series + the latest snapshot.
+    """
+    require_auth(x_akshare_token)
+    s = "20250101"
+    if start:
+        try:
+            s = datetime.strptime(start, "%Y-%m-%d").strftime("%Y%m%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid start date '{start}' (need YYYY-MM-DD)")
+    key = ("relative_yields", s)
+
+    def fetch():
+        t0 = time.time()
+        df = call_with_retry(lambda: ak.bond_zh_us_rate(start_date=s), attempts=2)
+        log.info("bond_zh_us_rate rows=%d in %.2fs",
+                 0 if df is None else len(df), time.time() - t0)
+        if df is None or df.empty:
+            return []
+        find = _col_finder(df)
+        dcol = find("日期")
+        cn2 = find("中国国债收益率2年")
+        cn5 = find("中国国债收益率5年")
+        cn10 = find("中国国债收益率10年-2年")  # spread col probed first to exclude below
+        cn10y = find("中国国债收益率10年")
+        cn30 = find("中国国债收益率30年")
+        cn_spread = find("中国国债收益率10年-2年")
+        us2 = find("美国国债收益率2年")
+        us5 = find("美国国债收益率5年")
+        us10y = find("美国国债收益率10年")
+        us30 = find("美国国债收益率30年")
+        us_spread = find("美国国债收益率10年-2年")
+        # cn10y/us10y must be the pure 10年 column, not the 10年-2年 spread.
+        # _col_finder returns the FIRST substring match; '中国国债收益率10年' also
+        # matches '中国国债收益率10年-2年', so re-resolve by exact-ish preference.
+        cols = list(df.columns)
+        def exact10(prefix):
+            cand = [c for c in cols if str(c).startswith(prefix) and "-" not in str(c)]
+            return cand[0] if cand else None
+        cn10y = exact10("中国国债收益率10年") or cn10y
+        us10y = exact10("美国国债收益率10年") or us10y
+
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            cn_10 = _num_cell(r, cn10y)
+            us_10 = _num_cell(r, us10y)
+            diff = None
+            if cn_10 is not None and us_10 is not None:
+                diff = round(us_10 - cn_10, 3)
+            rows.append({
+                "date": _date_cell(r, dcol),
+                "cn_2y": _num_cell(r, cn2),
+                "cn_5y": _num_cell(r, cn5),
+                "cn_10y": cn_10,
+                "cn_30y": _num_cell(r, cn30),
+                "cn_10y_2y": _num_cell(r, cn_spread),
+                "us_2y": _num_cell(r, us2),
+                "us_5y": _num_cell(r, us5),
+                "us_10y": us_10,
+                "us_30y": _num_cell(r, us30),
+                "us_10y_2y": _num_cell(r, us_spread),
+                "us_cn_10y_diff": diff,
+            })
+        rows = [x for x in rows if x["date"]]
+        rows.sort(key=lambda x: x["date"])
+        return rows
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("relative_yields failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+
+    n = max(1, min(int(limit or 260), len(rows))) if rows else 0
+    recent = rows[-n:] if rows else []
+    latest = recent[-1] if recent else None
+    return {
+        "source": "akshare",
+        "endpoint": "bond_zh_us_rate",
+        "start": s,
+        "count": len(recent),
+        "data": recent,
+        "latest": latest,
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request, exc: HTTPException):
     return JSONResponse(

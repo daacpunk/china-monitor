@@ -21,6 +21,7 @@ import { useSeries, getLatestValue, useCalendar, useRefreshSeries } from "@/hook
 import { useAnomalies, type AnomalyRow } from "@/hooks/useAnalysis";
 import { AnomalyBadge } from "@/components/AnomalyBadge";
 import { CompareButton } from "@/components/CompareModal";
+import { RelativeContextPanel } from "@/components/RelativeContextPanel";
 import { ExternalLink, ArrowRight } from "lucide-react";
 
 // ─── LiveStatCard ─────────────────────────────────────────────────────────────
@@ -467,6 +468,11 @@ export default function Overview() {
             </div>
           )}
         </Card>
+      </div>
+
+      {/* ── Relative & global context (Gap F) ─────────────────────────────── */}
+      <div className="mb-6">
+        <RelativeContextPanel />
       </div>
 
       {/* ── Policy headlines + Latest strategy note ───────────────────────── */}

@@ -13,6 +13,7 @@ import { buildRiskDashboard, type RiskBlock } from "../equity/riskDashboard";
 import { buildFlowsPositioning, type FlowsPositioning } from "../equity/flowsPositioning";
 import { buildEarningsContext, type NameEarningsContext } from "../equity/earningsContext";
 import { buildPolicyTransmission, type PolicyTransmissionChain } from "../equity/policyTransmission";
+import { buildRelativeContext, type RelativeContext } from "../equity/relativeContext";
 import type { ScenarioSet } from "../report/strategyNote";
 import type { CoverageTheme } from "../equity/universe";
 
@@ -63,6 +64,9 @@ export interface DocModel {
   // Policy transmission (Gap D): policy → affected theme(s) → live evidence →
   // ranked named beneficiaries/at-risk chains, for the deck TRANSMISSION slide.
   policyTransmission?: PolicyTransmissionChain[];
+  // Relative & global context (Gap F): AH premium + China index returns +
+  // USD/CNY + US-China 10Y differential + LLM stance, for the deck RELATIVE slide.
+  relativeContext?: RelativeContext;
 }
 
 function fnum(n: any, d = 1): string {
@@ -190,6 +194,16 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     /* transmission is best-effort; deck still renders without it */
   }
 
+  // Relative & global context (Gap F) for the dedicated deck RELATIVE slide.
+  let relativeContext: RelativeContext | undefined;
+  try {
+    const rc = await buildRelativeContext();
+    const hasData = !!(rc.ahPremium || rc.indexReturns.length || rc.crossAsset);
+    relativeContext = hasData ? rc : undefined;
+  } catch {
+    /* relative context is best-effort; deck still renders without it */
+  }
+
   return {
     title: note.title,
     asOfDate: note.asOfDate,
@@ -218,6 +232,7 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     flowsPositioning,
     earningsContext,
     policyTransmission,
+    relativeContext,
   };
 }
 

@@ -572,6 +572,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/equity/relative-context — top-down call: AH premium + China index
+   *  returns + USD/CNY + US-China 10Y differential, with an LLM stance + whyChina (Gap F).
+   *  ?refresh=1 (or ?nocache=1) bypasses the 6h cache for a fresh fetch. */
+  app.get("/api/equity/relative-context", async (req, res) => {
+    try {
+      const { buildRelativeContext } = await import("./equity/relativeContext");
+      const forceRefresh = req.query.refresh === "1" || req.query.nocache === "1";
+      const relative = await buildRelativeContext({ forceRefresh });
+      res.json(relative);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/akshare/health — debug: confirm sidecar is reachable + auth ok */
   app.get("/api/akshare/health", async (_req, res) => {
     try {
