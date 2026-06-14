@@ -288,7 +288,8 @@ async function genScenarios(
     "supports it, the emphasized themes), each with explicit triggers, key drivers, and a rough probability. " +
     "Also produce a FALSIFICATION list: concrete, observable conditions that would prove the base/bull thesis WRONG. " +
     "The BEAR scenario must reflect the devil's-advocate / red-team risks present in the SCENARIOS & RISK evidence. " +
-    "Output STRICT JSON only.";
+    "Output a SINGLE complete, valid JSON object only — no markdown, no ```json fence, no commentary. " +
+    "Keep each narrative tight (2-3 sentences) so the whole object fits well within the token budget and is never truncated.";
   const user =
     `${contextBlock}\n\n` +
     `Emphasized themes: ${emphasis}.\n` +
@@ -302,7 +303,10 @@ async function genScenarios(
     systemPrompt: system,
     userPrompt: user,
     actionContext: "report_scenarios_structured",
-    maxOutputTokens: 3000,
+    // Generous budget: portfolio + per-theme bull/base/bear + falsification is
+    // large; 3000 truncated the JSON mid-object (unclosed ```json fence), which
+    // broke both the structured parse and the prose fallback.
+    maxOutputTokens: 6000,
   });
 
   let scenarioSets: ScenarioSet[] = [];
@@ -388,17 +392,25 @@ export function scenarioSetsToProse(sets: ScenarioSet[]): string {
  */
 function stripJsonBlob(text: string): string {
   let s = (text || "").trim();
-  // Remove fenced ```json ... ``` blocks entirely.
+  // Remove CLOSED fenced ```json ... ``` blocks entirely.
   s = s.replace(/```(?:json)?\s*[\s\S]*?```/gi, "").trim();
-  // If what's left starts as a JSON object/array, it's the leaked payload — drop it.
+  // Handle an UNCLOSED ```json fence (truncated model output): strip from the
+  // opening fence to end-of-string. Without this, a fence with no closing ```
+  // is left verbatim and the raw JSON paginates across the deck.
+  const fenceIdx = s.search(/```(?:json)?/i);
+  if (fenceIdx !== -1) {
+    const lead = s.slice(0, fenceIdx).trim();
+    s = lead;
+  }
+  // If what's left starts as a JSON object/array (or still contains the leaked
+  // payload keys), drop the JSON portion — raw JSON must never reach the body.
   const looksJson = /^[\[{]/.test(s) && /"(scenarioSets|scenarios|label|narrative|triggers|keyDrivers|falsification)"/.test(s);
   if (looksJson) {
-    // Keep any prose that precedes the first brace/bracket; otherwise emit a note.
     const cut = s.search(/[\[{]/);
     const lead = cut > 0 ? s.slice(0, cut).trim() : "";
-    return lead || "Scenario detail unavailable for this note (structured payload could not be rendered).";
+    s = lead;
   }
-  return s;
+  return s || "Scenario detail unavailable for this note (structured payload could not be rendered).";
 }
 
 // ── Red-team section (always in Mode B; available in A) ─────────────────────────
