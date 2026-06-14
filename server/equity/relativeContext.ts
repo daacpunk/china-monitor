@@ -111,6 +111,9 @@ function returnSince(points: AkshareOhlcvPoint[], cutoff: string): number | null
     if (p.date >= cutoff && typeof p.close === "number") { base = p; break; }
   }
   if (!base || base.close == null || base.close === 0) return null;
+  // If the only point on/after the cutoff IS the latest point, there is no
+  // earlier anchor to measure against — return null rather than a fake 0%.
+  if (base === last || base.date === last.date) return null;
   return Math.round(((last.close - base.close) / base.close) * 1000) / 10;
 }
 
