@@ -52,6 +52,7 @@ export interface Scenario {
 
 export interface RiskBlock {
   scope: "portfolio" | CoverageTheme;
+  theme: CoverageTheme | null; // machine-readable theme id; null for the portfolio block
   label: string;
   risks: Risk[];
   scenarios: Scenario[];
@@ -220,62 +221,130 @@ async function genBlock(
   if (cached && Date.now() - cached.at < TTL) return { block: cached.block, cost: 0 };
 
   const label = scope === "portfolio" ? "Portfolio" : (THEMES_BY_ID[scope]?.label ?? scope);
-  const block: RiskBlock = { scope, label, risks: [], scenarios: [], falsification: [], notes: [...ev.notes] };
+  const theme: CoverageTheme | null = scope === "portfolio" ? null : (scope as CoverageTheme);
+  const block: RiskBlock = { scope, theme, label, risks: [], scenarios: [], falsification: [], notes: [...ev.notes] };
 
-  const model = opts.model ?? "claude-sonnet-4";
   const evidence = evidenceBlockFor(scope, ev);
   const baseThesis = baseThesisFor(scope);
 
-  // Red-team prompt seeds the bear-case / downside reasoning (personas).
+  // Two independent LLM calls so neither half can starve the other on the token
+  // budget (the earlier single-call version truncated before scenarios/
+  // falsification). Both share the same red-team-seeded grounding.
+  const [risksRes, scenRes] = await Promise.all([
+    genRisks(scope, label, evidence, baseThesis, opts).catch((e: any) => ({ risks: [] as Risk[], cost: 0, note: `Risks generation failed: ${e?.message ?? "unknown"}.` })),
+    genScenariosBlock(scope, label, evidence, baseThesis, opts).catch((e: any) => ({ scenarios: [] as Scenario[], falsification: [] as string[], cost: 0, note: `Scenarios generation failed: ${e?.message ?? "unknown"}.` })),
+  ]);
+
+  block.risks = risksRes.risks;
+  block.scenarios = scenRes.scenarios;
+  block.falsification = scenRes.falsification;
+  if ((risksRes as any).note) block.notes.push((risksRes as any).note);
+  if ((scenRes as any).note) block.notes.push((scenRes as any).note);
+  if (!block.risks.length && !block.scenarios.length && !block.notes.some((n) => n.includes("failed"))) {
+    block.notes.push("Model output could not be parsed; block is empty.");
+  }
+
+  // Only cache a block that actually populated something (so a transient empty
+  // refresh doesn't get pinned for 6h).
+  if (block.risks.length || block.scenarios.length) cache.set(cacheKey, { at: Date.now(), block });
+
+  return { block, cost: risksRes.cost + scenRes.cost };
+}
+
+/** Call 1: scored risks only (grounded + red-team seeded). */
+async function genRisks(
+  scope: "portfolio" | CoverageTheme,
+  label: string,
+  evidence: string,
+  baseThesis: string,
+  opts: BuildRiskOpts,
+): Promise<{ risks: Risk[]; cost: number; note?: string }> {
+  const model = opts.model ?? "claude-sonnet-4";
   const { system: rtSystem, user: rtUser, panel } = buildRedTeamPrompt({
     baseThesis,
     context: evidence.slice(0, 8000),
     panel: opts.redTeamPanel,
-    focusHint: `China/HK equity ${scope === "portfolio" ? "portfolio" : label} scenario & risk framing`,
+    focusHint: `China/HK equity ${scope === "portfolio" ? "portfolio" : label} risk scoring`,
   });
   const panelNames = panel.map((p) => p.name).join(", ");
 
   const system =
     rtSystem +
-    "\n\nNOW ACT AS the risk officer who, after hearing this devil's-advocate panel, must produce a STRUCTURED, " +
-    "SCORED risk dashboard plus bull/base/bear scenarios for an institutional China/HK equity strategist. " +
+    "\n\nNOW ACT AS the risk officer who, after hearing this devil's-advocate panel, produces a STRUCTURED, " +
+    "SCORED risk register for an institutional China/HK equity strategist. " +
     "Ground EVERY risk's evidence in a SPECIFIC live series value from the EVIDENCE BASE (cite the series name and value); " +
-    "do not invent data. The bear scenario and the higher-scored risks must reflect the panel's strongest objections. " +
+    "do not invent data. The higher-scored risks must reflect the panel's strongest objections. " +
     "Output STRICT JSON ONLY, no prose, no markdown fences.";
+  const user =
+    `${rtUser}\n\n` +
+    `=== EVIDENCE BASE (${scope}) ===\n${evidence}\n=== END EVIDENCE BASE ===\n\n` +
+    `Produce STRICT JSON for the ${scope === "portfolio" ? "overall portfolio" : `"${label}" theme`}:\n` +
+    `{ "risks": [ {"title","category":"macro|structural|policy|valuation|flow|geopolitical","likelihood":1-5,"impact":1-5,"trigger":"what would make it fire","evidence":"cite a specific live series name+value from the EVIDENCE BASE","mitigants":"what offsets it"} ] }  // 5-7 risks\n` +
+    `Rules: likelihood/impact are integers 1-5. The bear/high-score risks must channel the panel (${panelNames}). Evidence MUST reference a real series value above.`;
 
+  const res = await generateCommentary({
+    model,
+    systemPrompt: system,
+    userPrompt: user,
+    actionContext: `risk_dashboard_risks:${scope}`,
+    maxOutputTokens: 2400,
+  });
+  const obj = extractJsonObject(res.text);
+  return { risks: obj ? parseRisks(obj.risks, scope) : [], cost: res.costUsd };
+}
+
+/** Call 2: bull/base/bear scenarios + falsification only (bear reflects the panel). */
+async function genScenariosBlock(
+  scope: "portfolio" | CoverageTheme,
+  label: string,
+  evidence: string,
+  baseThesis: string,
+  opts: BuildRiskOpts,
+): Promise<{ scenarios: Scenario[]; falsification: string[]; cost: number; note?: string }> {
+  const model = opts.model ?? "claude-sonnet-4";
+  const { system: rtSystem, user: rtUser, panel } = buildRedTeamPrompt({
+    baseThesis,
+    context: evidence.slice(0, 8000),
+    panel: opts.redTeamPanel,
+    focusHint: `China/HK equity ${scope === "portfolio" ? "portfolio" : label} scenario framing`,
+  });
+  const panelNames = panel.map((p) => p.name).join(", ");
+
+  const system =
+    rtSystem +
+    "\n\nNOW ACT AS the strategist who, after hearing this devil's-advocate panel, frames STRUCTURED " +
+    "bull/base/bear scenarios plus a falsification list for an institutional China/HK equity strategist. " +
+    "Ground narratives in the EVIDENCE BASE; cite specific live series values where relevant; do not invent data. " +
+    "The BEAR scenario MUST reflect the panel's strongest objections. " +
+    "Output STRICT JSON ONLY, no prose, no markdown fences.";
   const user =
     `${rtUser}\n\n` +
     `=== EVIDENCE BASE (${scope}) ===\n${evidence}\n=== END EVIDENCE BASE ===\n\n` +
     `Produce STRICT JSON for the ${scope === "portfolio" ? "overall portfolio" : `"${label}" theme`}:\n` +
     `{\n` +
-    `  "risks": [ {"title","category":"macro|structural|policy|valuation|flow|geopolitical","likelihood":1-5,"impact":1-5,"trigger":"what would make it fire","evidence":"cite a specific live series name+value from the EVIDENCE BASE","mitigants":"what offsets it"} ],  // 5-7 risks\n` +
-    `  "scenarios": [ {"label":"bull","narrative","triggers":[..],"probability":0-100 or null,"keyDrivers":[..]}, {"label":"base",...}, {"label":"bear",...} ],  // exactly 3\n` +
-    `  "falsification": [ "concrete observation that would prove the bullish/base thesis WRONG", ... ]  // 3-5 items\n` +
+    `  "falsification": [ "concrete observation that would prove the bull/base thesis WRONG", ... ],  // 3-5 items, REQUIRED non-empty — emit FIRST\n` +
+    `  "scenarios": [\n` +
+    `    {"label":"bull","narrative":"...","triggers":["..."],"probability":0-100 or null,"keyDrivers":["..."]},\n` +
+    `    {"label":"base","narrative":"...","triggers":["..."],"probability":0-100 or null,"keyDrivers":["..."]},\n` +
+    `    {"label":"bear","narrative":"...","triggers":["..."],"probability":0-100 or null,"keyDrivers":["..."]}\n` +
+    `  ]  // EXACTLY these three labels\n` +
     `}\n` +
-    `Rules: likelihood/impact are integers 1-5. The bear scenario must channel the panel (${panelNames}). ` +
-    `Probabilities across bull/base/bear should sum to ~100 if given. Evidence MUST reference a real series value above.`;
+    `Rules: include all three of bull, base, bear. The bear scenario must channel the panel (${panelNames}). ` +
+    `Probabilities across bull/base/bear should sum to ~100 if given. falsification must be non-empty.`;
 
-  try {
-    const res = await generateCommentary({
-      model,
-      systemPrompt: system,
-      userPrompt: user,
-      actionContext: `risk_dashboard:${scope}`,
-      maxOutputTokens: 2600,
-    });
-    const obj = extractJsonObject(res.text);
-    if (obj) {
-      block.risks = parseRisks(obj.risks, scope);
-      block.scenarios = parseScenarios(obj.scenarios);
-      block.falsification = strArr(obj.falsification, 6);
-    }
-    if (!block.risks.length && !block.scenarios.length) block.notes.push("Model output could not be parsed; block is empty.");
-    cache.set(cacheKey, { at: Date.now(), block });
-    return { block, cost: res.costUsd };
-  } catch (err: any) {
-    block.notes.push(`Generation failed: ${err?.message ?? "unknown error"}.`);
-    return { block, cost: 0 };
-  }
+  const res = await generateCommentary({
+    model,
+    systemPrompt: system,
+    userPrompt: user,
+    actionContext: `risk_dashboard_scenarios:${scope}`,
+    maxOutputTokens: 2200,
+  });
+  const obj = extractJsonObject(res.text);
+  return {
+    scenarios: obj ? parseScenarios(obj.scenarios) : [],
+    falsification: obj ? strArr(obj.falsification, 6) : [],
+    cost: res.costUsd,
+  };
 }
 
 function parseRisks(arr: any, scope: "portfolio" | CoverageTheme): Risk[] {
@@ -396,23 +465,54 @@ function stripFence(text: string): string {
   return s;
 }
 
-/** Trim a truncated object to the last complete top-level element + close it. */
-function repairObject(snippet: string): string {
-  let depth = 0, inStr = false, esc = false, lastComplete = -1;
+/**
+ * Repair a truncated JSON object so complete leading fields/elements survive a
+ * mid-stream cut (the LLM running out of tokens). We scan once, recording the
+ * bracket stack at every "commit point" — a position right after a *complete
+ * value* (a closing `}`/`]`, the closing quote of a value string, or the end of
+ * a primitive). At each commit point the prefix can be made valid by closing
+ * the then-open containers. We try those candidates newest-first and return the
+ * first that parses, so e.g. a complete `falsification` array plus the complete
+ * leading `scenarios` elements are kept even when the last element was cut.
+ */
+function repairCandidates(snippet: string): string[] {
+  const commits: { end: number; stack: string[] }[] = [];
+  const stack: string[] = [];
+  let inStr = false, esc = false, expectKey = false;
+  // expectKey tracks whether the next string is an object key (after { or ,) —
+  // a key's closing quote is NOT a commit point; a value string's is.
+  const commit = (end: number) => commits.push({ end, stack: [...stack] });
   for (let i = 0; i < snippet.length; i++) {
     const ch = snippet[i];
     if (inStr) {
       if (esc) esc = false;
       else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
+      else if (ch === '"') {
+        inStr = false;
+        if (!expectKey) commit(i + 1); // closing quote of a value
+      }
       continue;
     }
-    if (ch === '"') inStr = true;
-    else if (ch === "{" || ch === "[") depth++;
-    else if (ch === "}" || ch === "]") { depth--; if (depth === 1) lastComplete = i; }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "{") { stack.push("{"); expectKey = true; }
+    else if (ch === "[") { stack.push("["); expectKey = false; }
+    else if (ch === "}" || ch === "]") { stack.pop(); commit(i + 1); expectKey = false; }
+    else if (ch === ":") { expectKey = false; }
+    else if (ch === ",") { expectKey = stack[stack.length - 1] === "{"; }
+    else if (/[\d.eE+\-]|t|r|u|e|f|a|l|s|n/.test(ch)) {
+      // inside a primitive (number/true/false/null); its end is a commit point
+      const next = snippet[i + 1];
+      if (next === undefined || /[\s,}\]]/.test(next)) commit(i + 1);
+    }
   }
-  if (lastComplete > 0) return snippet.slice(0, lastComplete + 1) + "}";
-  return snippet + "}";
+  const out: string[] = [];
+  for (let k = commits.length - 1; k >= 0; k--) {
+    const { end, stack: st } = commits[k];
+    let s = snippet.slice(0, end);
+    for (let j = st.length - 1; j >= 0; j--) s += st[j] === "[" ? "]" : "}";
+    out.push(s);
+  }
+  return out;
 }
 
 function extractJsonObject(text: string): any | null {
@@ -422,5 +522,8 @@ function extractJsonObject(text: string): any | null {
   const b = s.lastIndexOf("}");
   const candidate = b > a ? s.slice(a, b + 1) : s.slice(a);
   try { return JSON.parse(candidate); } catch { /* fall through */ }
-  try { return JSON.parse(repairObject(s.slice(a))); } catch { return null; }
+  for (const repaired of repairCandidates(s.slice(a))) {
+    try { return JSON.parse(repaired); } catch { /* try the next-earlier commit point */ }
+  }
+  return null;
 }

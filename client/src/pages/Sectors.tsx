@@ -85,6 +85,7 @@ interface Scenario {
 }
 interface RiskBlock {
   scope: string;
+  theme: string | null;
   label: string;
   risks: Risk[];
   scenarios: Scenario[];
