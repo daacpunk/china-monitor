@@ -661,6 +661,122 @@ def financials_valuation_history(
             "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
 
 
+@app.get("/financials/earnings")
+def financials_earnings(
+    symbol: str = Query(..., description="6-digit A-share code"),
+    x_akshare_token: Optional[str] = Header(None, alias="X-AKShare-Token"),
+) -> Dict[str, Any]:
+    """Quarterly revenue / net-profit growth + EPS for an A-share name (Gap B).
+
+    Source: ak.stock_financial_abstract_ths(symbol, indicator="按报告期").
+    Chinese cols (values are STRINGS with 亿/% suffixes):
+      报告期 (period 'YYYY-MM-DD'), 营业总收入 ('547.03亿'),
+      营业总收入同比增长率 ('6.34%'), 净利润 ('272.43亿'),
+      净利润同比增长率 ('1.47%'), 基本每股收益 ('21.7600').
+    Returns the most recent ~8 quarters ascending by period with ASCII keys:
+      {report_period, revenue, revenue_yoy, net_profit, net_profit_yoy, eps}
+    Parse 亿 -> numeric value-in-亿, % -> float, EPS -> float; null on failure.
+    """
+    require_auth(x_akshare_token)
+    if not symbol.isdigit() or len(symbol) != 6:
+        raise HTTPException(status_code=400, detail="A-share symbol must be 6 digits")
+    key = ("earnings", symbol)
+
+    def fetch():
+        import re as _re
+        import math as _m
+
+        def parse_yi(x):
+            """'547.03亿' -> 547.03 (value in 亿); '1.2万亿' -> 12000.0."""
+            if x is None:
+                return None
+            s = str(x).strip().replace(",", "")
+            if s in ("", "nan", "None", "--", "-"):
+                return None
+            try:
+                if "万亿" in s:
+                    return float(_re.sub(r"[^\d.\-]", "", s)) * 10000.0
+                if "亿" in s:
+                    return float(_re.sub(r"[^\d.\-]", "", s))
+                if "万" in s:
+                    return float(_re.sub(r"[^\d.\-]", "", s)) / 10000.0
+                v = float(_re.sub(r"[^\d.\-]", "", s))
+                return v if _m.isfinite(v) else None
+            except (TypeError, ValueError):
+                return None
+
+        def parse_pct(x):
+            if x is None:
+                return None
+            s = str(x).strip().replace(",", "")
+            if s in ("", "nan", "None", "--", "-"):
+                return None
+            try:
+                v = float(_re.sub(r"[^\d.\-]", "", s))
+                return v if _m.isfinite(v) else None
+            except (TypeError, ValueError):
+                return None
+
+        def parse_float(x):
+            if x is None:
+                return None
+            s = str(x).strip().replace(",", "")
+            if s in ("", "nan", "None", "--", "-"):
+                return None
+            try:
+                v = float(s)
+                return v if _m.isfinite(v) else None
+            except (TypeError, ValueError):
+                return None
+
+        df = call_with_retry(
+            lambda: ak.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期"),
+            attempts=3)
+        if df is None or df.empty:
+            return []
+        cols = list(df.columns)
+
+        def find(*subs):
+            for s in subs:
+                for c in cols:
+                    if s in str(c):
+                        return c
+            return None
+
+        pcol = find("报告期")
+        rev = find("营业总收入")
+        rev_yoy = find("营业总收入同比增长率", "营业收入同比增长率")
+        npf = find("净利润")
+        np_yoy = find("净利润同比增长率")
+        epscol = find("基本每股收益", "每股收益")
+        if not pcol:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, r in df.iterrows():
+            period = str(r[pcol]).strip()[:10] if pcol else None
+            if not period or not _re.match(r"\d{4}-\d{2}-\d{2}", period):
+                continue
+            rows.append({
+                "report_period": period,
+                "revenue": parse_yi(r[rev]) if rev else None,
+                "revenue_yoy": parse_pct(r[rev_yoy]) if rev_yoy else None,
+                "net_profit": parse_yi(r[npf]) if npf else None,
+                "net_profit_yoy": parse_pct(r[np_yoy]) if np_yoy else None,
+                "eps": parse_float(r[epscol]) if epscol else None,
+            })
+        rows.sort(key=lambda x: x["report_period"])
+        return rows[-8:]
+
+    try:
+        rows = cache_get_or_call(key, fetch)
+    except Exception as ex:
+        log.exception("earnings failed")
+        raise HTTPException(status_code=502, detail=f"AKShare upstream error: {ex}")
+    return {"source": "akshare", "symbol": symbol, "count": len(rows),
+            "data": rows, "fetched_at": datetime.utcnow().isoformat() + "Z"}
+
+
 # ─── Macro series (NBS/EastMoney via AKShare; bypasses US-IP WAF) ───────────
 def _macro_yoy_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Normalise an EastMoney cjsj macro DataFrame (cols 月份 / 当月 / 同比增长 ...)

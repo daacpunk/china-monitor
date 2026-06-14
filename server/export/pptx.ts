@@ -239,6 +239,52 @@ function renderFlowsSection(
   );
 }
 
+// Earnings momentum / quadrant → cell color for the FUNDAMENTALS table.
+const QUADRANT_COLOR: Record<string, string> = {
+  "cheap-improving": C.positive,
+  "expensive-deteriorating": C.negative,
+};
+
+function renderFundamentalsSection(
+  pptx: PptxGenJS,
+  model: DocModel,
+  io: { newSlide: (withFooter?: boolean) => PptxGenJS.Slide; heading: (s: PptxGenJS.Slide, title: string, sub?: string) => void; W: number; H: number },
+): void {
+  const ec = (model.earningsContext ?? []).filter((c) => c.revenueYoy != null || c.netProfitYoy != null);
+  if (!ec.length) return;
+  const { newSlide, heading, W } = io;
+  // Strongest net-profit YoY first (most notable).
+  ec.sort((a, b) => (b.netProfitYoy ?? -1e9) - (a.netProfitYoy ?? -1e9));
+
+  const pct = (v: number | null) => (v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`);
+  const s = newSlide();
+  heading(s, "Fundamentals", "Revenue / net-profit YoY · earnings momentum · cheap+improving quadrant");
+
+  const rows: PptxGenJS.TableRow[] = [
+    ["Name", "Rev YoY", "Net-profit YoY", "EPS", "Momentum", "Quadrant"].map(
+      (t) => ({ text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 10 } }),
+    ) as PptxGenJS.TableRow,
+  ];
+  for (const c of ec.slice(0, 16)) {
+    rows.push([
+      { text: `${c.nameEn} [${c.symbol}]`, options: { fontSize: 9, color: C.body } },
+      { text: pct(c.revenueYoy), options: { fontSize: 9, color: C.muted } },
+      { text: pct(c.netProfitYoy), options: { fontSize: 9, color: (c.netProfitYoy ?? 0) >= 0 ? C.positive : C.negative } },
+      { text: c.eps != null ? c.eps.toFixed(2) : "n/a", options: { fontSize: 9, color: C.muted } },
+      { text: c.momentum ?? "n/a", options: { fontSize: 9, color: C.body } },
+      { text: c.quadrant ?? "n/a", options: { fontSize: 9, bold: !!QUADRANT_COLOR[c.quadrant ?? ""], color: QUADRANT_COLOR[c.quadrant ?? ""] ?? C.muted } },
+    ] as PptxGenJS.TableRow);
+  }
+  s.addTable(rows, { x: 0.5, y: 1.7, w: W - 1, colW: [3.4, 1.5, 2.0, 1.2, 2.1, 2.1], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+  s.addText(
+    "Quadrant crosses each name's P/E percentile (vs own history) with earnings momentum: cheap = <40th pct, improving = net-profit YoY accelerating. Consensus/forward estimates omitted (no reliable free source).",
+    { x: 0.5, y: io.H - 0.9, w: W - 1, h: 0.5, fontSize: 9, italic: true, color: C.muted, valign: "top" },
+  );
+  s.addNotes(
+    ec.slice(0, 16).map((c) => `${c.nameEn} [${c.symbol}]: rev YoY ${pct(c.revenueYoy)}, net-profit YoY ${pct(c.netProfitYoy)}, momentum ${c.momentum ?? "n/a"}, quadrant ${c.quadrant ?? "n/a"}.`).join(" "),
+  );
+}
+
 export async function renderPptx(model: DocModel): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "W", width: 13.333, height: 7.5 });
@@ -412,6 +458,9 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
 
   // ════════════════ 5c. FLOWS & POSITIONING (Gap C) ════════════════
   renderFlowsSection(pptx, model, { newSlide, heading, W, H });
+
+  // ════════════════ 5d. FUNDAMENTALS (Gap B) ════════════════
+  renderFundamentalsSection(pptx, model, { newSlide, heading, W, H });
 
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {

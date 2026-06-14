@@ -58,6 +58,20 @@ interface ValuationCtx {
   peThemeCount: number | null;
   peThemeQuartile: number | null;
 }
+interface EarningsCtx {
+  symbol: string;
+  revenueYoy: number | null;
+  netProfitYoy: number | null;
+  eps: number | null;
+  reportPeriod: string | null;
+  momentum: "accelerating" | "decelerating" | "inflecting" | "flat" | null;
+  quadrant:
+    | "cheap-improving"
+    | "cheap-deteriorating"
+    | "expensive-improving"
+    | "expensive-deteriorating"
+    | null;
+}
 interface Catalyst {
   date: string;
   headline: string;
@@ -213,6 +227,16 @@ function NameRow({ name, themeId }: { name: SectorName; themeId: ThemeId }) {
   });
   const vctx = ctxQuery.data?.context?.find((c) => c.symbol === name.symbol);
 
+  // Earnings context (Gap B): latest revenue/net-profit YoY + earnings momentum
+  // + cheap+improving quadrant. Deduped per theme via React Query key.
+  const earnQuery = useQuery<{ context: EarningsCtx[] }, Error>({
+    queryKey: [`/api/equity/earnings-context`, themeId],
+    queryFn: async () => (await apiRequest("GET", `/api/equity/earnings-context?themes=${themeId}`)).json(),
+    enabled: open && name.market === "ashare",
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+  const ectx = earnQuery.data?.context?.find((c) => c.symbol === name.symbol);
+
   const catalystMutation = useMutation<{ catalysts: Catalyst[] }, Error, void>({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/equity/name-catalysts", {
@@ -274,6 +298,32 @@ function NameRow({ name, themeId }: { name: SectorName; themeId: ThemeId }) {
                     {vctx.peThemeRank != null && vctx.peThemeCount != null && vctx.peThemeCount > 1 && (
                       <Badge variant="outline" className="text-[10px]">
                         #{vctx.peThemeRank}/{vctx.peThemeCount} cheapest in theme{vctx.peThemeQuartile === 1 ? " · cheapest Q" : vctx.peThemeQuartile === 4 ? " · priciest Q" : ""}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                {ectx && (ectx.revenueYoy != null || ectx.netProfitYoy != null) && (
+                  <div className="flex w-full flex-wrap items-center gap-2 border-t pt-2">
+                    <span className="text-[10px] uppercase text-muted-foreground" title={ectx.reportPeriod ? `latest ${ectx.reportPeriod}` : ""}>Fundamentals</span>
+                    {ectx.revenueYoy != null && (
+                      <Badge variant="outline" className={`text-[10px] ${ectx.revenueYoy >= 0 ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-red-500/10 text-red-700 dark:text-red-300"}`}>
+                        Rev YoY {ectx.revenueYoy > 0 ? "+" : ""}{ectx.revenueYoy.toFixed(1)}%
+                      </Badge>
+                    )}
+                    {ectx.netProfitYoy != null && (
+                      <Badge variant="outline" className={`text-[10px] ${ectx.netProfitYoy >= 0 ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-red-500/10 text-red-700 dark:text-red-300"}`}>
+                        Net-profit YoY {ectx.netProfitYoy > 0 ? "+" : ""}{ectx.netProfitYoy.toFixed(1)}%
+                      </Badge>
+                    )}
+                    {ectx.eps != null && (
+                      <Badge variant="outline" className="text-[10px]">EPS {ectx.eps.toFixed(2)}</Badge>
+                    )}
+                    {ectx.momentum && (
+                      <Badge variant="outline" className="text-[10px]">momentum: {ectx.momentum}</Badge>
+                    )}
+                    {ectx.quadrant && (
+                      <Badge variant="outline" className={`text-[10px] ${ectx.quadrant === "cheap-improving" ? "bg-green-500/10 text-green-700 dark:text-green-300" : ectx.quadrant === "expensive-deteriorating" ? "bg-red-500/10 text-red-700 dark:text-red-300" : ""}`}>
+                        {ectx.quadrant}
                       </Badge>
                     )}
                   </div>

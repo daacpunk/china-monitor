@@ -518,6 +518,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/equity/earnings-context?themes=semi,ev — revenue/net-profit YoY + momentum + quadrant (Gap B) */
+  app.get("/api/equity/earnings-context", async (req, res) => {
+    try {
+      const { buildEarningsContext } = await import("./equity/earningsContext");
+      const themesParam = String(req.query.themes || "").trim();
+      const themes = themesParam ? (themesParam.split(",").map((s) => s.trim()) as any[]) : undefined;
+      const ctx = await buildEarningsContext(themes, 8);
+      res.json({ context: ctx, fetchedAt: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/equity/risk-dashboard?themes=semi,ev — scored risks + bull/base/bear scenarios (Gap E) */
   app.get("/api/equity/risk-dashboard", async (req, res) => {
     try {

@@ -11,6 +11,7 @@ import { buildBriefInputs } from "../analysis/brief";
 import { renderLineChart, renderBarChart, renderDonut, type ChartSeries } from "./charts";
 import { buildRiskDashboard, type RiskBlock } from "../equity/riskDashboard";
 import { buildFlowsPositioning, type FlowsPositioning } from "../equity/flowsPositioning";
+import { buildEarningsContext, type NameEarningsContext } from "../equity/earningsContext";
 import type { ScenarioSet } from "../report/strategyNote";
 import type { CoverageTheme } from "../equity/universe";
 
@@ -55,6 +56,9 @@ export interface DocModel {
   // Flow & positioning (Gap C): northbound + margin + sector leaders + LLM
   // regime, for the dedicated deck FLOWS slide. Best-effort.
   flowsPositioning?: FlowsPositioning;
+  // Fundamentals (Gap B): per-name revenue/net-profit YoY + EPS + earnings
+  // momentum + cheap/improving quadrant, for the deck FUNDAMENTALS slide.
+  earningsContext?: NameEarningsContext[];
 }
 
 function fnum(n: any, d = 1): string {
@@ -164,6 +168,15 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     /* flows are best-effort; deck still renders without them */
   }
 
+  // Fundamentals (Gap B) for the dedicated deck FUNDAMENTALS slide.
+  let earningsContext: NameEarningsContext[] | undefined;
+  try {
+    const emphasis = ((note.emphasis as any[]) ?? []) as CoverageTheme[];
+    earningsContext = await buildEarningsContext(emphasis.length ? emphasis : undefined, 8);
+  } catch {
+    /* fundamentals are best-effort; deck still renders without them */
+  }
+
   return {
     title: note.title,
     asOfDate: note.asOfDate,
@@ -190,6 +203,7 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     scenarioSets,
     riskBlocks,
     flowsPositioning,
+    earningsContext,
   };
 }
 

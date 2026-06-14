@@ -204,6 +204,32 @@ export async function getValuationHistory(
   }
 }
 
+/** One quarterly earnings point (Gap B). revenue/net_profit in 亿 RMB. */
+export interface EarningsPoint {
+  report_period: string;
+  revenue: number | null;
+  revenue_yoy: number | null;
+  net_profit: number | null;
+  net_profit_yoy: number | null;
+  eps: number | null;
+}
+
+/** Quarterly revenue/net-profit growth + EPS for an A-share name (Gap B). */
+export async function getEarnings(
+  symbol: string,
+): Promise<{ data: EarningsPoint[]; error?: string }> {
+  try {
+    const qs = new URLSearchParams({ symbol });
+    const r = await getJson<{ data: EarningsPoint[] }>(
+      `/financials/earnings?${qs}`,
+      45_000,
+    );
+    return { data: r.data ?? [] };
+  } catch (err: any) {
+    return { data: [], error: err.message };
+  }
+}
+
 // ─── Flows & positioning (Gap C: northbound / margin / leverage) ────────────
 
 /** One daily northbound (Stock Connect, 北向资金) history point. Values in CNY. */

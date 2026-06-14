@@ -21,6 +21,7 @@ import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "../equity/uni
 import { getAkshareValuation } from "../clients/akshare";
 import { fetchSeries } from "../series/fetchSeries";
 import { buildValuationContext, valuationContextLine } from "../equity/valuationContext";
+import { buildEarningsContext, earningsContextLine } from "../equity/earningsContext";
 import { buildRiskDashboard, riskDashboardDigest } from "../equity/riskDashboard";
 import { buildFlowsPositioning, flowsPositioningLine } from "../equity/flowsPositioning";
 import { querySonar } from "../clients/sonar";
@@ -153,6 +154,28 @@ async function sectorDigest(
   } catch {
     /* skip valuation context on failure */
   }
+  // FUNDAMENTALS (Gap B): latest revenue / net-profit YoY + EPS, earnings
+  // momentum tag, and the cheap+improving quadrant (valuation × momentum) for
+  // the emphasized themes' A-share names. Featured names listed first. Mirrors
+  // the VALUATION CONTEXT block; degrades gracefully (never throws to report).
+  let fundBlock = "";
+  try {
+    const fThemes = (emphasis.length ? emphasis : undefined) as CoverageTheme[] | undefined;
+    const ectx = await buildEarningsContext(fThemes, 8);
+    const withData = ectx.filter((c) => c.revenueYoy != null || c.netProfitYoy != null);
+    // Featured first, then by strongest net-profit YoY (most notable).
+    withData.sort((a, b) => {
+      const fa = featured.has(a.symbol) ? 0 : 1, fb = featured.has(b.symbol) ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      return (b.netProfitYoy ?? -1e9) - (a.netProfitYoy ?? -1e9);
+    });
+    const lines = withData.slice(0, 14).map((c) => `  - ${earningsContextLine(c)}${featured.has(c.symbol) ? " ★" : ""}`);
+    if (lines.length) {
+      fundBlock = `\nFUNDAMENTALS (latest revenue/net-profit YoY + EPS, earnings momentum, cheap+improving quadrant; ★ = featured):\n${lines.join("\n")}`;
+    }
+  } catch {
+    /* skip fundamentals on failure */
+  }
   // SCENARIOS & RISK (Gap E): scored risks + bull/base/bear + falsification per
   // theme + portfolio, grounded in the live series. Mirrors the VALUATION CONTEXT
   // block above; degrades gracefully (never throws to the report).
@@ -181,7 +204,7 @@ async function sectorDigest(
   } catch {
     /* skip flows & positioning on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + riskBlock + flowsBlock;
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock;
 }
 
 async function sonarDigest(
