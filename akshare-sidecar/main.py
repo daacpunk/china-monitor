@@ -1400,11 +1400,25 @@ def relative_ah_premium(
 
     def fetch():
         t0 = time.time()
-        df = call_with_retry(lambda: ak.stock_zh_ah_spot(), attempts=2)
-        log.info("stock_zh_ah_spot rows=%d in %.2fs",
-                 0 if df is None else len(df), time.time() - t0)
+        # Prefer the EastMoney AH frame (carries A & H prices + premium) when it
+        # is up; fall back to the plain frame. As of 2026-06 the EM endpoint
+        # (DLMK0101) returns 502 upstream even from HK, and the plain frame only
+        # carries H-share quotes (no A price / premium column), so the premium
+        # is frequently uncomputable — we report that honestly rather than 0.
+        df = None
+        used = None
+        try:
+            df = call_with_retry(lambda: ak.stock_zh_ah_spot_em(), attempts=2)
+            used = "stock_zh_ah_spot_em"
+        except Exception as ex:
+            log.info("stock_zh_ah_spot_em unavailable (%s); trying plain frame", str(ex)[:80])
+        if df is None or getattr(df, "empty", True):
+            df = call_with_retry(lambda: ak.stock_zh_ah_spot(), attempts=2)
+            used = "stock_zh_ah_spot"
+        log.info("AH spot (%s) rows=%d in %.2fs",
+                 used, 0 if df is None else len(df), time.time() - t0)
         if df is None or df.empty:
-            return {}
+            return {"note": "AH premium source returned no rows (upstream unavailable)."}
         find = _col_finder(df)
         code_col = find("代码")
         name_col = find("名称")
@@ -1448,7 +1462,14 @@ def relative_ah_premium(
             pairs.append({"name": name, "code": code, "premium_pct": round(premium, 2)})
 
         if not pairs:
-            return {}
+            return {
+                "note": (
+                    f"AH premium uncomputable: source '{used}' carries no A/H "
+                    "price or premium column (EastMoney AH endpoint is 502 "
+                    "upstream as of 2026-06; the plain frame is H-share quotes "
+                    "only). No reliable free AH-premium source currently."
+                ),
+            }
         prems = sorted(p["premium_pct"] for p in pairs)
         n = len(prems)
         median = prems[n // 2] if n % 2 == 1 else (prems[n // 2 - 1] + prems[n // 2]) / 2.0

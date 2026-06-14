@@ -236,7 +236,14 @@ async function assembleRelative(): Promise<AssembledRelative> {
   ]);
 
   const ahPremium = buildAhSignal((ahRes as any).data ?? null);
-  if (!ahPremium) notes.push("AH premium unavailable (sidecar /relative/ah_premium).");
+  if (!ahPremium) {
+    const srcNote = (ahRes as any)?.data?.note;
+    notes.push(
+      srcNote
+        ? `AH premium unavailable: ${srcNote}`
+        : "AH premium unavailable (no reliable free AH-premium source currently; EastMoney AH endpoint is 502 upstream).",
+    );
+  }
 
   const indexReturns = [csi300, shComp, hsi].filter((x): x is IndexReturn => !!x);
   if (!indexReturns.length) notes.push("China index returns unavailable (index history).");
