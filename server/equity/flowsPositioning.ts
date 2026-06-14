@@ -26,6 +26,7 @@ import {
   getMarginBalances,
   getAkshareSectorFlows,
   type NorthboundPoint,
+  type NorthboundSummaryRow,
   type MarginPoint,
 } from "../clients/akshare";
 
@@ -33,15 +34,34 @@ export type FlowRegime = "risk-on" | "risk-off" | "neutral" | "extreme";
 
 const VALID_REGIMES: FlowRegime[] = ["risk-on", "risk-off", "neutral", "extreme"];
 
+/**
+ * Northbound (Stock Connect 北向资金) daily net-flow disclosure was DISCONTINUED
+ * by HKEX/the exchanges in Aug 2024 — the last session with a real daily net-buy
+ * value is ~2024-08-16; every row after is null and holdings_mktval reads 0.
+ * We treat a latest-real-data date before this cutoff as "discontinued" and stop
+ * feeding the dead series to the LLM as if it were a live signal.
+ */
+const NORTHBOUND_DISCONTINUED_BEFORE = "2024-09-01";
+
 /** Northbound (Stock Connect) summary derived from the raw daily series. */
 export interface NorthboundSignal {
-  latestDate: string | null;
+  status: "live" | "discontinued";
+  latestDate: string | null;     // latest row date in the series (may be null-valued)
+  lastDataDate: string | null;   // last session with a real (non-null) daily net buy
   net5d: number | null;          // sum of daily net buy, last 5 sessions (CNY)
   net20d: number | null;         // sum of daily net buy, last 20 sessions (CNY)
   cumulativeDirection: "rising" | "falling" | "flat" | null;
   cumulativeNetBuy: number | null;
   holdingsMktval: number | null;
+  note: string | null;
   series: { date: string; dailyNetBuy: number | null; cumulativeNetBuy: number | null }[];
+}
+
+/** Southbound (港股通, 南向资金) flow derived from the today summary. PRIMARY connect signal now. */
+export interface SouthboundSignal {
+  tradeDate: string | null;
+  netBuy: number | null;         // today's net buy (CNY; summary 亿 values normalized ×1e8)
+  direction: "inflow" | "outflow" | "flat" | null;
 }
 
 /** Margin / leverage trend derived from the raw daily series. */
@@ -67,6 +87,7 @@ export interface FlowsPositioning {
   drivers: string[];
   positioningExtremes: string[];
   northbound: NorthboundSignal | null;
+  southbound: SouthboundSignal | null;
   margin: MarginSignal | null;
   sectorInflows: SectorFlowLeader[];
   sectorOutflows: SectorFlowLeader[];
@@ -77,6 +98,7 @@ export interface FlowsPositioning {
 
 export interface BuildFlowsOpts {
   model?: LlmModel;
+  forceRefresh?: boolean;        // bypass the 6h cache read (still writes the cache)
 }
 
 // ── cache (mirror riskDashboard.ts) ──────────────────────────────────────────
@@ -117,8 +139,19 @@ function buildNorthboundSignal(rows: NorthboundPoint[]): NorthboundSignal | null
   const latest = rows[rows.length - 1];
   const dailyNets = rows.map((r) => r.daily_net_buy);
   const cumSeries = rows.map((r) => r.cumulative_net_buy).filter((v): v is number => typeof v === "number");
+
+  // Last session with a REAL (non-null, finite) daily net-buy value.
+  let lastDataDate: string | null = null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const v = rows[i].daily_net_buy;
+    if (typeof v === "number" && Number.isFinite(v)) { lastDataDate = rows[i].date ?? null; break; }
+  }
+  // Discontinued once the freshest real value predates the HKEX cutoff (or none at all).
+  const status: NorthboundSignal["status"] =
+    !lastDataDate || lastDataDate < NORTHBOUND_DISCONTINUED_BEFORE ? "discontinued" : "live";
+
   let cumulativeDirection: NorthboundSignal["cumulativeDirection"] = null;
-  if (cumSeries.length >= 2) {
+  if (status === "live" && cumSeries.length >= 2) {
     const a = cumSeries[Math.max(0, cumSeries.length - 21)];
     const b = cumSeries[cumSeries.length - 1];
     const diff = b - a;
@@ -126,13 +159,44 @@ function buildNorthboundSignal(rows: NorthboundPoint[]): NorthboundSignal | null
     cumulativeDirection = Math.abs(diff) / denom < 0.005 ? "flat" : diff > 0 ? "rising" : "falling";
   }
   return {
+    status,
     latestDate: latest.date ?? null,
-    net5d: sumLast(dailyNets, 5),
-    net20d: sumLast(dailyNets, 20),
+    lastDataDate,
+    net5d: status === "live" ? sumLast(dailyNets, 5) : null,
+    net20d: status === "live" ? sumLast(dailyNets, 20) : null,
     cumulativeDirection,
-    cumulativeNetBuy: latest.cumulative_net_buy ?? null,
-    holdingsMktval: latest.holdings_mktval ?? null,
+    cumulativeNetBuy: status === "live" ? latest.cumulative_net_buy ?? null : null,
+    holdingsMktval: status === "live" ? latest.holdings_mktval ?? null : null,
+    note:
+      status === "discontinued"
+        ? `HKEX discontinued daily Northbound net-flow disclosure (Aug 2024); Southbound + margin used instead.${lastDataDate ? ` Last data: ${lastDataDate}.` : ""}`
+        : null,
     series: rows.slice(-60).map((r) => ({ date: r.date, dailyNetBuy: r.daily_net_buy, cumulativeNetBuy: r.cumulative_net_buy })),
+  };
+}
+
+/** Build today's Southbound (港股通 / 南向资金) flow from the connect summary rows. */
+function buildSouthboundSignal(rows: NorthboundSummaryRow[]): SouthboundSignal | null {
+  if (!rows.length) return null;
+  // 南向 / 港股通 rows carry Southbound (HK-bound) flow; pick the aggregate net.
+  const south = rows.filter(
+    (r) => /南向|港股通/.test(String(r.direction ?? "")) || /南向|港股通/.test(String(r.type ?? "")),
+  );
+  if (!south.length) return null;
+  const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  // net_buy in this summary endpoint is reported in 亿 (100M CNY); normalize to
+  // raw CNY (×1e8) so it matches the rest of the pipeline's CNY + yi() convention.
+  // (net_inflow is a quota-style figure here, not a comparable flow — ignore it.)
+  const parts = south.map((r) => num(r.net_buy)).filter((v): v is number => v != null);
+  const netBuyYi = parts.length ? parts.reduce((a, b) => a + b, 0) : null;
+  const netBuy = netBuyYi == null ? null : netBuyYi * 1e8;
+  // Threshold in 亿: under ~0.5亿 net is effectively flat.
+  const direction: SouthboundSignal["direction"] =
+    netBuyYi == null ? null : Math.abs(netBuyYi) < 0.5 ? "flat" : netBuyYi > 0 ? "inflow" : "outflow";
+  return {
+    tradeDate: south[0]?.trade_date ?? null,
+    netBuy,
+    direction,
   };
 }
 
@@ -158,18 +222,24 @@ function buildMarginSignal(rows: MarginPoint[]): MarginSignal | null {
     const hi = sorted[Math.floor(sorted.length * 0.75)];
     level = latest.financing_balance >= hi ? "elevated" : latest.financing_balance <= lo ? "low" : "moderate";
   }
+  // financing_balance is reported in 亿 (100M CNY) by the sidecar; normalize the
+  // ABSOLUTE values to raw CNY (×1e8) so yi()/fmtYi render correctly. Trend, level
+  // and pctChange20d are ratio-based and unaffected, so they stay on the raw 亿.
+  const toCny = (v: number | null | undefined) =>
+    typeof v === "number" && Number.isFinite(v) ? v * 1e8 : null;
   return {
     latestDate: latest.date ?? null,
-    financingBalance: latest.financing_balance ?? null,
+    financingBalance: toCny(latest.financing_balance),
     trend,
     pctChange20d,
     level,
-    series: rows.slice(-60).map((r) => ({ date: r.date, financingBalance: r.financing_balance })),
+    series: rows.slice(-60).map((r) => ({ date: r.date, financingBalance: toCny(r.financing_balance) })),
   };
 }
 
 interface AssembledFlows {
   northbound: NorthboundSignal | null;
+  southbound: SouthboundSignal | null;
   margin: MarginSignal | null;
   sectorInflows: SectorFlowLeader[];
   sectorOutflows: SectorFlowLeader[];
@@ -178,18 +248,22 @@ interface AssembledFlows {
 
 async function assembleFlows(): Promise<AssembledFlows> {
   const notes: string[] = [];
-  const [nb, , mg, flows] = await Promise.all([
+  const [nb, summary, mg, flows] = await Promise.all([
     getNorthboundFlows(250).catch((e: any) => ({ data: [] as NorthboundPoint[], error: e?.message })),
-    getNorthboundSummary().catch(() => ({ data: [] as any[] })),
+    getNorthboundSummary().catch(() => ({ data: [] as NorthboundSummaryRow[] })),
     getMarginBalances(250).catch((e: any) => ({ data: [] as MarginPoint[], error: e?.message })),
     getAkshareSectorFlows("今日").catch(() => ({ data: [] as any[], error: "unavailable" })),
   ]);
 
   const northbound = buildNorthboundSignal((nb as any).data ?? []);
-  if (!northbound) notes.push("Northbound flows unavailable (sidecar /flows/northbound may not be deployed yet).");
+  if (!northbound) notes.push("Northbound flows unavailable (sidecar /flows/northbound).");
+  else if (northbound.status === "discontinued" && northbound.note) notes.push(northbound.note);
+
+  const southbound = buildSouthboundSignal(((summary as any).data ?? []) as NorthboundSummaryRow[]);
+  if (!southbound) notes.push("Southbound (港股通) flow unavailable this refresh.");
 
   const margin = buildMarginSignal((mg as any).data ?? []);
-  if (!margin) notes.push("Margin balances unavailable (sidecar /flows/margin may not be deployed yet).");
+  if (!margin) notes.push("Margin balances unavailable (sidecar /flows/margin).");
 
   // Top sector inflows/outflows from the live snapshot (intermittent upstream).
   const sectorInflows: SectorFlowLeader[] = [];
@@ -204,36 +278,36 @@ async function assembleFlows(): Promise<AssembledFlows> {
     notes.push("Sector fund flows unavailable (EastMoney intermittent).");
   }
 
-  return { northbound, margin, sectorInflows, sectorOutflows, notes };
+  return { northbound, southbound, margin, sectorInflows, sectorOutflows, notes };
 }
 
 // ── prompt evidence block ────────────────────────────────────────────────────
 
 function evidenceBlock(a: AssembledFlows): string {
   const parts: string[] = [];
-  if (a.northbound) {
-    const nb = a.northbound;
-    parts.push(
-      "NORTHBOUND (Stock Connect 北向资金, live daily, CNY):\n" +
-        `  - As of ${nb.latestDate ?? "?"}\n` +
-        `  - Net buy last 5 sessions: ${yi(nb.net5d)}\n` +
-        `  - Net buy last 20 sessions: ${yi(nb.net20d)}\n` +
-        `  - Cumulative net buy: ${yi(nb.cumulativeNetBuy)} (direction over ~20d: ${nb.cumulativeDirection ?? "n/a"})\n` +
-        `  - Holdings market value: ${yi(nb.holdingsMktval)}`,
-    );
-  } else {
-    parts.push("NORTHBOUND: unavailable this refresh.");
-  }
+  // MARGIN / LEVERAGE is the PRIMARY live signal (daily net Northbound was
+  // discontinued by HKEX in Aug 2024 — see below), so lead with it.
   if (a.margin) {
     const m = a.margin;
     parts.push(
-      "MARGIN / LEVERAGE (market-wide 融资余额, live daily, CNY):\n" +
+      "MARGIN / LEVERAGE — PRIMARY SIGNAL (market-wide 融资余额, live daily, CNY):\n" +
         `  - As of ${m.latestDate ?? "?"}\n` +
         `  - Financing balance: ${yi(m.financingBalance)} (level: ${m.level ?? "n/a"})\n` +
-        `  - Trend over ~20d: ${m.trend ?? "n/a"}${m.pctChange20d != null ? ` (${m.pctChange20d > 0 ? "+" : ""}${m.pctChange20d}%)` : ""}`,
+        `  - Trend over ~20d: ${m.trend ?? "n/a"}${m.pctChange20d != null ? ` (${m.pctChange20d > 0 ? "+" : ""}${m.pctChange20d}%)` : ""}\n` +
+        `  - Interpretation guide: rising financing balance = leverage build / risk-on; falling = de-risking / risk-off.`,
     );
   } else {
     parts.push("MARGIN / LEVERAGE: unavailable this refresh.");
+  }
+  if (a.southbound) {
+    const sb = a.southbound;
+    parts.push(
+      "SOUTHBOUND (港股通 / 南向资金, today, CNY) — live connect flow:\n" +
+        `  - Trade date: ${sb.tradeDate ?? "?"}\n` +
+        `  - Net buy: ${yi(sb.netBuy)} (direction ${sb.direction ?? "n/a"})`,
+    );
+  } else {
+    parts.push("SOUTHBOUND (港股通): unavailable this refresh.");
   }
   if (a.sectorInflows.length || a.sectorOutflows.length) {
     const ins = a.sectorInflows.map((s) => `${s.sector} +${yi(s.netInflow)}`).join("; ");
@@ -241,6 +315,22 @@ function evidenceBlock(a: AssembledFlows): string {
     parts.push(`SECTOR FUND FLOWS (today, EastMoney):\n  - Top inflows: ${ins || "n/a"}\n  - Top outflows: ${outs || "n/a"}`);
   } else {
     parts.push("SECTOR FUND FLOWS: unavailable this refresh.");
+  }
+  // Northbound is a single FACT, not a numeric input — keep the model from
+  // reasoning over (or warning about) the dead null series.
+  if (a.northbound?.status === "discontinued") {
+    parts.push(
+      "NORTHBOUND (Stock Connect 北向资金): DISCONTINUED. HKEX/exchanges stopped " +
+        `publishing daily Northbound net-flow in Aug 2024 (last real data ${a.northbound.lastDataDate ?? "~2024-08-16"}). ` +
+        "This is a real-world disclosure change, NOT a data gap or quality issue — do NOT flag it as such. " +
+        "Base the regime on the margin/leverage trend, Southbound, and sector flows above.",
+    );
+  } else if (a.northbound) {
+    const nb = a.northbound;
+    parts.push(
+      "NORTHBOUND (Stock Connect 北向资金, live daily, CNY):\n" +
+        `  - As of ${nb.latestDate ?? "?"}; net buy 5d ${yi(nb.net5d)}, 20d ${yi(nb.net20d)}; cumulative ${nb.cumulativeDirection ?? "n/a"}.`,
+    );
   }
   return parts.join("\n\n");
 }
@@ -254,17 +344,21 @@ async function interpret(
   const model = opts.model ?? "claude-sonnet-4";
   const system =
     "You are a flow & positioning strategist for an institutional China/HK equity desk. " +
-    "Given the live northbound (Stock Connect) flows, market-wide margin/leverage trend, and sector fund flows, " +
-    "classify the current positioning REGIME and explain it. Ground EVERY claim in a SPECIFIC value from the " +
-    "EVIDENCE BASE (cite the series name + value, e.g. 'northbound +XX亿 over 5d'); do not invent data. " +
+    "Classify the current positioning REGIME from the live signals. The BACKBONE of the regime is the " +
+    "market-wide MARGIN/LEVERAGE trend (rising financing balance = leverage build / risk-on; falling = de-risking / risk-off), " +
+    "supplemented by Southbound (港股通) connect flow and sector fund flows. " +
+    "Northbound (Stock Connect) daily net-flow was DISCONTINUED by HKEX in Aug 2024 — treat its absence as a known " +
+    "real-world disclosure change, NOT a data gap; do NOT emit 'data quality', 'data integrity', or 'data warning' language. " +
+    "Ground EVERY claim in a SPECIFIC value from the EVIDENCE BASE (cite the series name + value, e.g. 'financing balance +X% over 20d'); do not invent data. " +
     "positioningExtremes are crowded/stretched or capitulation conditions a PM should be warned about. " +
     "Output STRICT JSON ONLY, no prose, no markdown fences.";
   const user =
     `=== EVIDENCE BASE ===\n${evidence}\n=== END EVIDENCE BASE ===\n\n` +
     "Produce STRICT JSON:\n" +
     `{ "regime": "risk-on|risk-off|neutral|extreme", "confidence": 0-100, "narrative": "2-4 sentences citing specific series values", "drivers": ["..."], "positioningExtremes": ["crowded/stretched/capitulation flags, or [] if none"] }\n` +
-    "Rules: regime MUST be one of the four labels. narrative + drivers MUST cite real values from the EVIDENCE BASE. " +
-    "Use 'extreme' only when flows/leverage are at a stretched or capitulation extreme. positioningExtremes may be empty.";
+    "Rules: regime MUST be one of the four labels and MUST be driven primarily by the margin/leverage trend (then Southbound, then sector flows). " +
+    "narrative + drivers MUST cite real values from the EVIDENCE BASE. Do NOT mention Northbound's discontinuation as a weakness or caveat in confidence — margin/leverage is a complete signal on its own. " +
+    "Use 'extreme' only when leverage/flows are at a stretched or capitulation extreme. positioningExtremes may be empty.";
 
   const res = await generateCommentary({
     model,
@@ -291,8 +385,10 @@ async function interpret(
  * data + notes when the sidecar (pre-deploy 404), sector flows, or LLM fail.
  */
 export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<FlowsPositioning> {
-  const cached = cache.get(CACHE_KEY);
-  if (cached && Date.now() - cached.at < TTL) return cached.result;
+  if (!opts.forceRefresh) {
+    const cached = cache.get(CACHE_KEY);
+    if (cached && Date.now() - cached.at < TTL) return cached.result;
+  }
 
   const model = opts.model ?? "claude-sonnet-4";
 
@@ -300,7 +396,7 @@ export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<
   try {
     a = await assembleFlows();
   } catch (err: any) {
-    a = { northbound: null, margin: null, sectorInflows: [], sectorOutflows: [], notes: [`Flow assembly failed: ${err?.message ?? "unknown"}.`] };
+    a = { northbound: null, southbound: null, margin: null, sectorInflows: [], sectorOutflows: [], notes: [`Flow assembly failed: ${err?.message ?? "unknown"}.`] };
   }
 
   const result: FlowsPositioning = {
@@ -311,6 +407,7 @@ export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<
     drivers: [],
     positioningExtremes: [],
     northbound: a.northbound,
+    southbound: a.southbound,
     margin: a.margin,
     sectorInflows: a.sectorInflows,
     sectorOutflows: a.sectorOutflows,
@@ -319,8 +416,11 @@ export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<
     costUsd: 0,
   };
 
-  // Only call the LLM if we have at least one live signal to interpret.
-  const haveSignal = !!(a.northbound || a.margin || a.sectorInflows.length || a.sectorOutflows.length);
+  // Only call the LLM if we have at least one LIVE signal. A discontinued
+  // Northbound series is NOT a live signal (its numbers are null), so it does
+  // not by itself justify an LLM call.
+  const liveNorthbound = a.northbound?.status === "live";
+  const haveSignal = !!(liveNorthbound || a.southbound || a.margin || a.sectorInflows.length || a.sectorOutflows.length);
   if (haveSignal) {
     try {
       const llm = await interpret(evidenceBlock(a), opts);
@@ -351,19 +451,27 @@ export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<
 export function flowsPositioningLine(f: FlowsPositioning): string {
   const parts: string[] = [];
   if (f.regime) parts.push(`Regime: ${f.regime}${f.confidence != null ? ` (${f.confidence}% conf)` : ""}`);
-  if (f.northbound) {
-    const nb = f.northbound;
-    const dir = nb.cumulativeDirection ? `, cumulative ${nb.cumulativeDirection}` : "";
-    parts.push(`Northbound 5d ${yi(nb.net5d)} / 20d ${yi(nb.net20d)}${dir}`);
-  }
+  // Margin/leverage is the primary signal — lead with it.
   if (f.margin) {
     const m = f.margin;
     parts.push(`Margin ${yi(m.financingBalance)} (${m.trend ?? "n/a"}${m.pctChange20d != null ? ` ${m.pctChange20d > 0 ? "+" : ""}${m.pctChange20d}% 20d` : ""}, ${m.level ?? "n/a"})`);
+  }
+  if (f.southbound) {
+    const sb = f.southbound;
+    parts.push(`Southbound net ${yi(sb.netBuy)} (${sb.direction ?? "n/a"})`);
   }
   if (f.sectorInflows.length) parts.push(`Top inflows: ${f.sectorInflows.slice(0, 3).map((s) => `${s.sector} +${yi(s.netInflow)}`).join("; ")}`);
   if (f.sectorOutflows.length) parts.push(`Top outflows: ${f.sectorOutflows.slice(0, 3).map((s) => `${s.sector} ${yi(s.netInflow)}`).join("; ")}`);
   if (f.narrative) parts.push(f.narrative.slice(0, 200));
   if (f.positioningExtremes.length) parts.push(`Extremes: ${f.positioningExtremes.slice(0, 2).join("; ")}`);
+  // Footnote the Northbound discontinuation (live values shown only if still live).
+  if (f.northbound?.status === "discontinued") {
+    parts.push(`Northbound: discontinued${f.northbound.lastDataDate ? ` (last ${f.northbound.lastDataDate})` : ""}`);
+  } else if (f.northbound) {
+    const nb = f.northbound;
+    const dir = nb.cumulativeDirection ? `, cumulative ${nb.cumulativeDirection}` : "";
+    parts.push(`Northbound 5d ${yi(nb.net5d)} / 20d ${yi(nb.net20d)}${dir}`);
+  }
   if (!parts.length && f.notes.length) return f.notes.join(" ");
   return parts.join(" | ");
 }

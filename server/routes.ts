@@ -531,11 +531,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /** GET /api/equity/flows-positioning — northbound + margin + sector flows + LLM regime (Gap C) */
-  app.get("/api/equity/flows-positioning", async (_req, res) => {
+  /** GET /api/equity/flows-positioning — margin/leverage (primary) + Southbound + sector flows + LLM regime (Gap C).
+   *  ?refresh=1 (or ?nocache=1) bypasses the 6h cache for a fresh fetch. */
+  app.get("/api/equity/flows-positioning", async (req, res) => {
     try {
       const { buildFlowsPositioning } = await import("./equity/flowsPositioning");
-      const flows = await buildFlowsPositioning();
+      const forceRefresh = req.query.refresh === "1" || req.query.nocache === "1";
+      const flows = await buildFlowsPositioning({ forceRefresh });
       res.json(flows);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

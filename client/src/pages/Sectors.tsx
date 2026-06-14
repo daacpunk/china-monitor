@@ -100,12 +100,20 @@ interface RiskDashboard {
 }
 
 interface NorthboundSignal {
+  status: "live" | "discontinued";
   latestDate: string | null;
+  lastDataDate: string | null;
   net5d: number | null;
   net20d: number | null;
   cumulativeDirection: "rising" | "falling" | "flat" | null;
   cumulativeNetBuy: number | null;
   holdingsMktval: number | null;
+  note: string | null;
+}
+interface SouthboundSignal {
+  tradeDate: string | null;
+  netBuy: number | null;
+  direction: "inflow" | "outflow" | "flat" | null;
 }
 interface MarginSignal {
   latestDate: string | null;
@@ -126,6 +134,7 @@ interface FlowsPositioning {
   drivers: string[];
   positioningExtremes: string[];
   northbound: NorthboundSignal | null;
+  southbound: SouthboundSignal | null;
   margin: MarginSignal | null;
   sectorInflows: SectorFlowLeader[];
   sectorOutflows: SectorFlowLeader[];
@@ -470,14 +479,14 @@ function FlowsPositioningPanel() {
     staleTime: 6 * 60 * 60 * 1000,
   });
   const f = q.data;
-  const nb = f?.northbound, mg = f?.margin;
+  const nb = f?.northbound, mg = f?.margin, sb = f?.southbound;
 
   return (
     <Card className="mb-4 p-4" data-testid="card-flows-positioning">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Activity className="h-4 w-4 text-primary" /> Flows & positioning
-          <Badge variant="outline" className="text-[9px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">northbound · margin · LLM regime</Badge>
+          <Badge variant="outline" className="text-[9px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">margin · southbound · LLM regime</Badge>
         </div>
         {f?.regime && (
           <Badge variant="outline" className={`text-[10px] ${REGIME_TONE[f.regime] ?? ""}`} title={f.confidence != null ? `${f.confidence}% confidence` : ""}>
@@ -506,31 +515,42 @@ function FlowsPositioningPanel() {
           )}
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-md border p-3" data-testid="flows-nb-5d">
-              <div className="text-[10px] uppercase text-muted-foreground">Northbound 5d net</div>
-              <div className={`mt-1 text-xl font-semibold ${nb?.net5d == null ? "text-muted-foreground" : nb.net5d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {fmtYi(nb?.net5d)}
-              </div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">{nb?.latestDate ?? ""}</div>
-            </div>
-            <div className="rounded-md border p-3" data-testid="flows-nb-20d">
-              <div className="text-[10px] uppercase text-muted-foreground">Northbound 20d net</div>
-              <div className={`mt-1 text-xl font-semibold ${nb?.net20d == null ? "text-muted-foreground" : nb.net20d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {fmtYi(nb?.net20d)}
-              </div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">cumulative {nb?.cumulativeDirection ?? "—"}</div>
-            </div>
             <div className="rounded-md border p-3" data-testid="flows-margin">
-              <div className="text-[10px] uppercase text-muted-foreground">Margin balance</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Margin balance (primary)</div>
               <div className="mt-1 text-xl font-semibold">{fmtYi(mg?.financingBalance)}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                {mg?.trend ?? "—"}{mg?.pctChange20d != null ? ` ${mg.pctChange20d > 0 ? "+" : ""}${mg.pctChange20d}% 20d` : ""} · {mg?.level ?? "—"}
-              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{mg?.latestDate ?? ""}</div>
             </div>
-            <div className="rounded-md border p-3" data-testid="flows-holdings">
-              <div className="text-[10px] uppercase text-muted-foreground">NB holdings mktval</div>
-              <div className="mt-1 text-xl font-semibold">{fmtYi(nb?.holdingsMktval, 0)}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">cumulative {fmtYi(nb?.cumulativeNetBuy, 0)}</div>
+            <div className="rounded-md border p-3" data-testid="flows-margin-trend">
+              <div className="text-[10px] uppercase text-muted-foreground">Margin trend 20d</div>
+              <div className={`mt-1 text-xl font-semibold ${mg?.pctChange20d == null ? "text-muted-foreground" : mg.pctChange20d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {mg?.pctChange20d != null ? `${mg.pctChange20d > 0 ? "+" : ""}${mg.pctChange20d}%` : "—"}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{mg?.trend ?? "—"} · {mg?.level ?? "—"}</div>
+            </div>
+            <div className="rounded-md border p-3" data-testid="flows-southbound">
+              <div className="text-[10px] uppercase text-muted-foreground">Southbound net (today)</div>
+              <div className={`mt-1 text-xl font-semibold ${sb?.netBuy == null ? "text-muted-foreground" : sb.netBuy >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {fmtYi(sb?.netBuy)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{sb?.direction ?? "—"}{sb?.tradeDate ? ` · ${sb.tradeDate}` : ""}</div>
+            </div>
+            <div className="rounded-md border p-3" data-testid="flows-northbound">
+              <div className="text-[10px] uppercase text-muted-foreground">Northbound</div>
+              {nb?.status === "discontinued" ? (
+                <>
+                  <div className="mt-1 text-sm font-medium text-muted-foreground">discontinued</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground" title="HKEX discontinued daily Northbound net-flow disclosure (Aug 2024)">
+                    last: {nb.lastDataDate ?? "2024-08-16"}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={`mt-1 text-xl font-semibold ${nb?.net5d == null ? "text-muted-foreground" : nb.net5d >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                    {fmtYi(nb?.net5d)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">5d net · 20d {fmtYi(nb?.net20d)}</div>
+                </>
+              )}
             </div>
           </div>
 
@@ -561,7 +581,7 @@ function FlowsPositioningPanel() {
             </div>
           )}
 
-          {!nb && !mg && f.sectorInflows.length === 0 && f.notes.length > 0 && (
+          {!mg && !sb && (!nb || nb.status === "discontinued") && f.sectorInflows.length === 0 && f.notes.length > 0 && (
             <div className="text-[11px] text-muted-foreground">{f.notes.join(" ")}</div>
           )}
         </div>

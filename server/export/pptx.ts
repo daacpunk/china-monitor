@@ -160,13 +160,13 @@ function renderFlowsSection(
 ): void {
   const f = model.flowsPositioning;
   if (!f) return;
-  const nb = f.northbound, mg = f.margin;
-  const haveAny = !!(nb || mg || f.sectorInflows.length || f.sectorOutflows.length || f.regime);
+  const nb = f.northbound, mg = f.margin, sb = f.southbound;
+  const haveAny = !!(mg || sb || f.sectorInflows.length || f.sectorOutflows.length || f.regime);
   if (!haveAny) return;
   const { newSlide, heading, W, H } = io;
 
   const s = newSlide();
-  heading(s, "Flows & Positioning", "Northbound · margin/leverage · sector flows · regime");
+  heading(s, "Flows & Positioning", "Margin/leverage · Southbound · sector flows · regime");
 
   // Regime badge + narrative
   if (f.regime) {
@@ -182,24 +182,37 @@ function renderFlowsSection(
     s.addText(f.narrative, { x: 0.5, y: 2.1, w: W - 1, h: 1.0, fontSize: 12, color: C.body, valign: "top", lineSpacingMultiple: 1.12 });
   }
 
-  // Metric table: northbound + margin
+  // Metric table: margin (primary) → southbound. Northbound numbers are dead
+  // (discontinued Aug 2024) so they are footnoted, not tabled.
   const metricRows: PptxGenJS.TableRow[] = [
     ["Signal", "Reading"].map((t) => ({ text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 } })) as PptxGenJS.TableRow,
   ];
-  if (nb) {
-    metricRows.push([
-      { text: "Northbound (Stock Connect)", options: { fontSize: 10, color: C.body } },
-      { text: `5d ${yiStr(nb.net5d)} · 20d ${yiStr(nb.net20d)} · cumulative ${nb.cumulativeDirection ?? "n/a"} (${yiStr(nb.cumulativeNetBuy)})`, options: { fontSize: 10, color: C.muted } },
-    ]);
-  }
   if (mg) {
     metricRows.push([
-      { text: "Margin / leverage", options: { fontSize: 10, color: C.body } },
+      { text: "Margin / leverage (primary)", options: { fontSize: 10, color: C.body, bold: true } },
       { text: `${yiStr(mg.financingBalance)} · ${mg.trend ?? "n/a"}${mg.pctChange20d != null ? ` ${mg.pctChange20d > 0 ? "+" : ""}${mg.pctChange20d}% 20d` : ""} · level ${mg.level ?? "n/a"}`, options: { fontSize: 10, color: C.muted } },
+    ]);
+  }
+  if (sb) {
+    metricRows.push([
+      { text: "Southbound (港股通, today)", options: { fontSize: 10, color: C.body } },
+      { text: `net ${yiStr(sb.netBuy)} · ${sb.direction ?? "n/a"}${sb.tradeDate ? ` · ${sb.tradeDate}` : ""}`, options: { fontSize: 10, color: C.muted } },
+    ]);
+  }
+  if (nb && nb.status === "live") {
+    metricRows.push([
+      { text: "Northbound (Stock Connect)", options: { fontSize: 10, color: C.body } },
+      { text: `5d ${yiStr(nb.net5d)} · 20d ${yiStr(nb.net20d)} · cumulative ${nb.cumulativeDirection ?? "n/a"}`, options: { fontSize: 10, color: C.muted } },
     ]);
   }
   if (metricRows.length > 1) {
     s.addTable(metricRows, { x: 0.5, y: 3.2, w: W - 1, colW: [3.2, W - 4.2], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+  }
+  if (nb && nb.status === "discontinued") {
+    s.addText(
+      `Northbound (Stock Connect 北向资金): daily net-flow disclosure discontinued by HKEX (Aug 2024; last data ${nb.lastDataDate ?? "2024-08-16"}). Regime driven by margin/leverage + Southbound.`,
+      { x: 0.5, y: 4.05, w: W - 1, h: 0.35, fontSize: 9, italic: true, color: C.muted, valign: "top" },
+    );
   }
 
   // Sector leaders (two columns)
