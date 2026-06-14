@@ -322,7 +322,10 @@ async function genScenarios(
     /* fall through to prose */
   }
 
-  const body = scenarioSets.length ? renderScenariosProse(scenarioSets) : res.text.trim();
+  // body MUST be clean prose — raw JSON must NEVER reach it. When we have the
+  // structured sets, render prose from them; otherwise strip any ```json fence /
+  // leading JSON blob from the model output so the deck/UI never paginate it.
+  const body = scenarioSets.length ? scenarioSetsToProse(scenarioSets) : stripJsonBlob(res.text);
   return {
     section: { key: "scenarios", heading: "Scenarios (Base / Bull / Bear)", body, data: scenarioSets.length ? { scenarioSets } : undefined },
     cost: res.costUsd,
@@ -350,22 +353,52 @@ function parseNoteScenarios(arr: any): NoteScenario[] {
   return out;
 }
 
-/** Backward-compatible readable prose from the structured scenario sets. */
-function renderScenariosProse(sets: ScenarioSet[]): string {
+/**
+ * Render the structured scenario sets to clean institutional PROSE — never JSON.
+ * Portfolio scope first, then any per-theme sets. Each scenario is a short
+ * paragraph ("Bull (prob X%): <narrative>") followed by compact Triggers / Key
+ * drivers lines, and each set closes with a falsification list.
+ */
+export function scenarioSetsToProse(sets: ScenarioSet[]): string {
+  const ordered = [...sets].sort((a, b) => (a.scope === "portfolio" ? -1 : b.scope === "portfolio" ? 1 : 0));
   const blocks: string[] = [];
-  for (const set of sets) {
+  for (const set of ordered) {
     const title = set.scope === "portfolio" ? "Portfolio" : set.scope;
     const lines: string[] = [`### ${title}`];
     for (const s of set.scenarios) {
-      const head = `**${s.label[0].toUpperCase() + s.label.slice(1)}${s.probability != null ? ` (~${s.probability}%)` : ""}.**`;
-      lines.push(`${head} ${s.narrative}`);
-      if (s.triggers.length) lines.push(`- Triggers: ${s.triggers.join("; ")}`);
-      if (s.keyDrivers.length) lines.push(`- Key drivers: ${s.keyDrivers.join("; ")}`);
+      const cap = s.label[0].toUpperCase() + s.label.slice(1);
+      const head = `**${cap}${s.probability != null ? ` (prob ${s.probability}%)` : ""}:**`;
+      lines.push(`${head} ${s.narrative}`.trim());
+      if (s.triggers.length) lines.push(`Triggers: ${s.triggers.join("; ")}`);
+      if (s.keyDrivers.length) lines.push(`Key drivers: ${s.keyDrivers.join("; ")}`);
     }
-    if (set.falsification.length) lines.push(`**Falsification (thesis wrong if):** ${set.falsification.join("; ")}`);
+    if (set.falsification.length) {
+      lines.push("Falsification — what would prove this wrong:");
+      for (const f of set.falsification) lines.push(`- ${f}`);
+    }
     blocks.push(lines.join("\n"));
   }
   return blocks.join("\n\n");
+}
+
+/**
+ * Last-resort cleaner for when the structured parse failed: strip any ```json
+ * fenced block, and if the remaining text is still predominantly a raw JSON
+ * object/array, drop it so raw JSON never reaches the section body.
+ */
+function stripJsonBlob(text: string): string {
+  let s = (text || "").trim();
+  // Remove fenced ```json ... ``` blocks entirely.
+  s = s.replace(/```(?:json)?\s*[\s\S]*?```/gi, "").trim();
+  // If what's left starts as a JSON object/array, it's the leaked payload — drop it.
+  const looksJson = /^[\[{]/.test(s) && /"(scenarioSets|scenarios|label|narrative|triggers|keyDrivers|falsification)"/.test(s);
+  if (looksJson) {
+    // Keep any prose that precedes the first brace/bracket; otherwise emit a note.
+    const cut = s.search(/[\[{]/);
+    const lead = cut > 0 ? s.slice(0, cut).trim() : "";
+    return lead || "Scenario detail unavailable for this note (structured payload could not be rendered).";
+  }
+  return s;
 }
 
 // ── Red-team section (always in Mode B; available in A) ─────────────────────────

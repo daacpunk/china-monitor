@@ -37,11 +37,22 @@ function makePrinter(): PdfPrinter {
   return printer;
 }
 
+// True when a body is predominantly a raw JSON blob (leaked structured payload).
+function looksLikeJsonBody(body: string): boolean {
+  const s = (body || "").trim().replace(/^```(?:json)?\s*/i, "");
+  return /^[\[{]/.test(s) && /"(scenarioSets|scenarios|label|narrative|triggers|keyDrivers|falsification)"/.test(s);
+}
+
 // Strip light markdown into pdfmake text runs (bold + bullets + paragraphs).
 function mdBlocks(md: string): any[] {
+  // Never paginate a leaked raw-JSON body; drop any fenced ```json block first.
+  let src = (md || "").replace(/```(?:json)?\s*[\s\S]*?```/gi, "").trim();
+  if (looksLikeJsonBody(src)) return [];
   const out: any[] = [];
-  const paras = (md || "").trim().split(/\n{2,}/);
+  const paras = src.split(/\n{2,}/);
   for (const para of paras) {
+    // Drop standalone horizontal rules (---, ***, ___).
+    if (/^\s*([-*_])\1{2,}\s*$/.test(para)) continue;
     const lines = para.split(/\n/);
     const isBullets = lines.every((l) => /^\s*[-•]\s+/.test(l));
     if (isBullets) {
@@ -55,10 +66,22 @@ function mdBlocks(md: string): any[] {
   return out;
 }
 
-// Returns a text array honoring **bold**.
+// Returns a text array honoring **bold**; strips stray single * / _ emphasis
+// markers so they don't render as literal characters.
 function inline(s: string): any {
   const parts = (s || "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
-  return parts.map((p) => (p.startsWith("**") && p.endsWith("**") ? { text: p.slice(2, -2), bold: true } : p));
+  return parts.map((p) =>
+    p.startsWith("**") && p.endsWith("**")
+      ? { text: stripEmphasis(p.slice(2, -2)), bold: true }
+      : stripEmphasis(p),
+  );
+}
+
+// Remove leftover single-* / single-_ italic markers around words.
+function stripEmphasis(s: string): string {
+  return (s || "")
+    .replace(/(^|[^*])\*([^*\n]+?)\*/g, "$1$2")
+    .replace(/(^|[^_])_([^_\n]+?)_/g, "$1$2");
 }
 
 export function renderPdfFromModel(model: DocModel): Promise<Buffer> {

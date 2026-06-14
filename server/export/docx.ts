@@ -13,18 +13,36 @@ import type { StrategyNote } from "@shared/schema";
 
 const C = BRAND.colors;
 
+// Remove leftover single-* / single-_ italic markers so they don't render literally.
+function stripEmphasis(s: string): string {
+  return (s || "")
+    .replace(/(^|[^*])\*([^*\n]+?)\*/g, "$1$2")
+    .replace(/(^|[^_])_([^_\n]+?)_/g, "$1$2");
+}
+
+// True when a body is predominantly a raw JSON blob (leaked structured payload).
+function looksLikeJsonBody(body: string): boolean {
+  const s = (body || "").trim().replace(/^```(?:json)?\s*/i, "");
+  return /^[\[{]/.test(s) && /"(scenarioSets|scenarios|label|narrative|triggers|keyDrivers|falsification)"/.test(s);
+}
+
 function runs(md: string): TextRun[] {
-  // honor **bold**
+  // honor **bold**, strip stray single-emphasis markers
   return (md || "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((p) =>
     p.startsWith("**") && p.endsWith("**")
-      ? new TextRun({ text: p.slice(2, -2), bold: true })
-      : new TextRun(p),
+      ? new TextRun({ text: stripEmphasis(p.slice(2, -2)), bold: true })
+      : new TextRun(stripEmphasis(p)),
   );
 }
 
 function bodyParagraphs(md: string): Paragraph[] {
+  // Never emit a leaked raw-JSON body; drop any fenced ```json block first.
+  const src = (md || "").replace(/```(?:json)?\s*[\s\S]*?```/gi, "").trim();
+  if (looksLikeJsonBody(src)) return [];
   const out: Paragraph[] = [];
-  for (const para of (md || "").trim().split(/\n{2,}/)) {
+  for (const para of src.split(/\n{2,}/)) {
+    // Drop standalone horizontal rules (---, ***, ___).
+    if (/^\s*([-*_])\1{2,}\s*$/.test(para)) continue;
     const lines = para.split(/\n/);
     const bullets = lines.every((l) => /^\s*[-•]\s+/.test(l));
     if (bullets) {

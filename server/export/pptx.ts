@@ -35,13 +35,26 @@ function chunk(text: string, size = CHARS_PER_SLIDE): string[] {
   return out.flatMap((c) => (c.length <= size * 1.5 ? [c] : c.match(new RegExp(`[\\s\\S]{1,${size}}`, "g")) ?? [c]));
 }
 
-// Strip light markdown to plain text for slide bullets.
+// Strip light markdown to plain text for slide bullets. Also defensively removes
+// any leaked ```json fenced block so raw JSON is never paginated verbatim.
 function plain(md: string): string {
   return (md || "")
+    .replace(/```(?:json)?\s*[\s\S]*?```/gi, "") // drop fenced code/JSON blocks
     .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")              // bold
+    .replace(/(^|[^*])\*([^*\n]+?)\*/g, "$1$2")   // italic *...* (not bullet *)
+    .replace(/(^|[^_])_([^_\n]+?)_/g, "$1$2")     // italic _..._
+    .replace(/^\s*([-*_])\1{2,}\s*$/gm, "")       // standalone --- / *** / ___ rules
     .replace(/^[\s]*[-•]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// True when a section body is predominantly a raw JSON object/array (a leaked
+// structured payload), so the generic body renderer should skip it.
+function looksLikeJsonBody(body: string): boolean {
+  const s = (body || "").trim().replace(/^```(?:json)?\s*/i, "");
+  return /^[\[{]/.test(s) && /"(scenarioSets|scenarios|label|narrative|triggers|keyDrivers|falsification)"/.test(s);
 }
 
 // Risk score → cell fill (heat). score = likelihood × impact, 1..25.
@@ -645,7 +658,15 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
     catalysts_calendar: "Forward calendar",
     risks_redteam: "Devil's-advocate panel",
   };
+  const haveStructuredScenarios = (model.scenarioSets?.length ?? 0) > 0;
   for (const sec of model.sections) {
+    // The scenarios section is rendered as clean bull/base/bear tables +
+    // falsification by renderScenarioRiskSection below when structured data is
+    // present — so skip the generic prose pagination to avoid duplication. Also
+    // skip any body that is still a raw JSON blob (e.g. legacy notes) so it is
+    // never paginated verbatim.
+    if (sec.key === "scenarios" && haveStructuredScenarios) continue;
+    if (looksLikeJsonBody(sec.body)) continue;
     bodySlides(sec.heading, SUBS[sec.key], sec.body, sec.body.slice(0, 700));
     if (sec.key === "cross_asset_flows") figureSlide(findFig("crossasset"), "Cross-Asset Levels");
   }
