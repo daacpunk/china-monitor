@@ -97,11 +97,12 @@ async function computeOne(
   nameEn: string,
   theme: CoverageTheme,
   valuationPercentile: number | null,
+  forceRefresh = false,
 ): Promise<NameEarningsContext> {
   const cached = cache.get(symbol);
   // Cache only when the valuation cross is identical, so a fresh valuation
-  // percentile re-evaluates the quadrant.
-  if (cached && Date.now() - cached.at < TTL && cached.ctx.valuationPercentile === valuationPercentile) {
+  // percentile re-evaluates the quadrant. forceRefresh bypasses the read.
+  if (!forceRefresh && cached && Date.now() - cached.at < TTL && cached.ctx.valuationPercentile === valuationPercentile) {
     return cached.ctx;
   }
 
@@ -136,7 +137,11 @@ async function computeOne(
     ctx.note = `earnings error (${err?.message ?? "unknown"})`;
   }
 
-  cache.set(symbol, { at: Date.now(), ctx });
+  // Only pin to cache when earnings actually loaded, so a transient sidecar
+  // 404/timeout never freezes null earnings for the full TTL.
+  if (ctx.netProfitYoy != null || ctx.revenueYoy != null) {
+    cache.set(symbol, { at: Date.now(), ctx });
+  }
   return ctx;
 }
 
@@ -148,6 +153,7 @@ async function computeOne(
 export async function buildEarningsContext(
   themes?: CoverageTheme[],
   limitPerTheme = 8,
+  forceRefresh = false,
 ): Promise<NameEarningsContext[]> {
   const universe = themes && themes.length
     ? SECTOR_UNIVERSE.filter((t) => themes.includes(t.id))
@@ -167,7 +173,7 @@ export async function buildEarningsContext(
     const ashare = theme.names.filter((n) => n.market === "ashare").slice(0, limitPerTheme);
     const ctxs = await Promise.all(
       ashare.map((n) =>
-        computeOne(n.symbol, n.nameEn, theme.id, valBySymbol.get(n.symbol)?.pePercentile ?? null),
+        computeOne(n.symbol, n.nameEn, theme.id, valBySymbol.get(n.symbol)?.pePercentile ?? null, forceRefresh),
       ),
     );
     out.push(...ctxs);

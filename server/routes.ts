@@ -524,7 +524,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { buildEarningsContext } = await import("./equity/earningsContext");
       const themesParam = String(req.query.themes || "").trim();
       const themes = themesParam ? (themesParam.split(",").map((s) => s.trim()) as any[]) : undefined;
-      const ctx = await buildEarningsContext(themes, 8);
+      const forceRefresh = req.query.refresh === "1" || req.query.nocache === "1";
+      const ctx = await buildEarningsContext(themes, 8, forceRefresh);
       res.json({ context: ctx, fetchedAt: new Date().toISOString() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
