@@ -12,7 +12,7 @@
  * House-view panel with change-log + "propose update". Export is Phase 4.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
@@ -227,14 +227,63 @@ export default function Report() {
   });
   const note = noteQuery.data?.note;
 
-  const genMutation = useMutation<{ note: StrategyNote }, Error, void>({
+  // Generation is asynchronous: POST returns a jobId (202), then we poll the
+  // job-status endpoint until it transitions to success/failed. This avoids the
+  // platform's ~300s HTTP gateway timeout on long thesis-driven notes.
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
+  const genStartRef = useRef(0);
+  const POLL_TIMEOUT_MS = 12 * 60 * 1000;
+
+  const startMutation = useMutation<{ jobId: number }, Error, void>({
     mutationFn: async () => {
       const body = { mode, userThesis: mode === "thesis_driven" ? thesis : undefined, emphasis, featuredNames: featured, model };
       return (await apiRequest("POST", "/api/report/generate", body)).json();
     },
-    onSuccess: (data) => { setActiveNoteId(data.note.id); queryClient.invalidateQueries({ queryKey: ["/api/report"] }); toast({ title: "Report generated", description: `${data.note.sections.length} sections.` }); },
-    onError: (e) => toast({ title: "Generation failed", description: e.message, variant: "destructive" }),
+    onSuccess: (data) => { setGenError(null); genStartRef.current = Date.now(); setJobId(data.jobId); },
+    onError: (e) => { setGenError(e.message); toast({ title: "Generation failed", description: e.message, variant: "destructive" }); },
   });
+
+  const jobQuery = useQuery<{ id: number; status: string; noteId: number | null; error: string | null }, Error>({
+    queryKey: [`/api/report/job/${jobId}`],
+    queryFn: async () => (await apiRequest("GET", `/api/report/job/${jobId}`)).json(),
+    enabled: jobId != null,
+    // Keep polling while running; stop on a terminal status. Transient fetch
+    // errors don't stop the interval, so polling stays resilient.
+    refetchInterval: (q) => {
+      const s = (q.state.data as any)?.status;
+      return s === "success" || s === "failed" ? false : 4500;
+    },
+  });
+
+  // Handle terminal job transitions.
+  useEffect(() => {
+    const data = jobQuery.data;
+    if (jobId == null || !data) return;
+    if (data.status === "success" && data.noteId != null) {
+      setActiveNoteId(data.noteId);
+      setJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/report"] });
+      toast({ title: "Report generated" });
+    } else if (data.status === "failed") {
+      setGenError(data.error || "Generation failed.");
+      setJobId(null);
+      toast({ title: "Generation failed", description: data.error || "", variant: "destructive" });
+    }
+  }, [jobQuery.data, jobId, toast]);
+
+  // Client-side safety timeout — stop polling but the note will still land in the vault.
+  useEffect(() => {
+    if (jobId == null) return;
+    const timer = setTimeout(() => {
+      setGenError("Still generating — check the report list shortly; the note will appear in the vault when done.");
+      setJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/report"] });
+    }, POLL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [jobId]);
+
+  const generating = jobId != null || startMutation.isPending;
 
   const toggle = (arr: string[], v: string, set: (x: string[]) => void) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -300,13 +349,16 @@ export default function Report() {
               <option value="deepseek-chat">DeepSeek Chat</option>
             </select>
           </div>
-          <Button className="ml-auto gap-2 self-end" onClick={() => genMutation.mutate()} disabled={!canGenerate || genMutation.isPending} data-testid="button-generate-report">
-            {genMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {genMutation.isPending ? "Generating (section-by-section)…" : "Generate report"}
+          <Button className="ml-auto gap-2 self-end" onClick={() => startMutation.mutate()} disabled={!canGenerate || generating} data-testid="button-generate-report">
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {generating ? "Generating…" : "Generate report"}
           </Button>
         </div>
-        {genMutation.isPending && (
-          <div className="mt-2 text-xs text-muted-foreground">Assembling evidence (macro, policy, sectors, Sonar) and writing each section — this takes ~1-2 minutes.</div>
+        {generating && (
+          <div className="mt-2 text-xs text-muted-foreground">Generating… this can take a few minutes for thesis-driven reports. You can leave this tab open — the note will also appear in the report list when done.</div>
+        )}
+        {genError && !generating && (
+          <div className="mt-2 text-xs text-destructive" data-testid="text-generate-error">{genError}</div>
         )}
       </Card>
 

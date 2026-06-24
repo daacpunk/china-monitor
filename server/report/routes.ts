@@ -144,30 +144,65 @@ export function registerReportRoutes(app: Express): void {
         model: b.model,
         redTeamPanel: b.redTeamPanel,
       };
-      const gen = await generateStrategyNote(opts);
-      const hv = await storage.getHouseView();
-      const saved = await storage.insertStrategyNote({
-        title: gen.title,
-        asOfDate: gen.asOfDate,
-        mode: b.mode,
-        userThesis: b.userThesis ?? "",
-        featuredNames: b.featuredNames,
-        mustInclude: b.mustInclude,
-        emphasis: b.emphasis,
-        sections: gen.sections,
-        portfolio: gen.portfolio ?? null,
-        thesisVerdict: gen.thesisVerdict ?? null,
-        houseViewSnapshot: hv ?? null,
-        citations: gen.citations,
-        model: gen.model,
-        costUsd: gen.costUsd,
-        tokensIn: gen.tokensIn,
-        tokensOut: gen.tokensOut,
-        status: "draft",
+
+      // Generation runs MANY LLM calls and can exceed the platform's HTTP
+      // gateway timeout (~300s) for thesis-driven notes. Create a job row,
+      // return 202 immediately, and do the work in the background — the client
+      // polls GET /api/report/job/:id for completion.
+      const job = await storage.insertJobRun({
+        kind: "manual", status: "running", steps: [], costUsd: 0, noteId: null, finishedAt: null, error: null,
       });
-      res.json({ note: saved });
+      res.status(202).json({ jobId: job.id });
+
+      void (async () => {
+        try {
+          const gen = await generateStrategyNote(opts);
+          const hv = await storage.getHouseView();
+          const saved = await storage.insertStrategyNote({
+            title: gen.title,
+            asOfDate: gen.asOfDate,
+            mode: b.mode,
+            userThesis: b.userThesis ?? "",
+            featuredNames: b.featuredNames,
+            mustInclude: b.mustInclude,
+            emphasis: b.emphasis,
+            sections: gen.sections,
+            portfolio: gen.portfolio ?? null,
+            thesisVerdict: gen.thesisVerdict ?? null,
+            houseViewSnapshot: hv ?? null,
+            citations: gen.citations,
+            model: gen.model,
+            costUsd: gen.costUsd,
+            tokensIn: gen.tokensIn,
+            tokensOut: gen.tokensOut,
+            status: "draft",
+          });
+          await storage.updateJobRun(job.id, {
+            status: "success", finishedAt: new Date(), noteId: saved.id, costUsd: gen.costUsd ?? 0,
+            steps: [{ step: "generate", ok: true, detail: `note #${saved.id}` }],
+          });
+        } catch (err: any) {
+          console.error("[report] background generation failed:", err);
+          await storage.updateJobRun(job.id, {
+            status: "failed", finishedAt: new Date(), error: err?.message ?? String(err),
+          }).catch((e) => console.error("[report] failed to mark job failed:", e));
+        }
+      })().catch((e) => console.error("[report] background task crashed:", e));
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** GET /api/report/job/:id — poll status of a background generation job. */
+  app.get("/api/report/job/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const job = await storage.getJobRun(id);
+      if (!job) return res.status(404).json({ error: "Not found" });
+      res.json({ id: job.id, status: job.status, noteId: job.noteId ?? null, error: job.error ?? null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

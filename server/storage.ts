@@ -985,6 +985,11 @@ export class DatabaseStorage implements IStorage {
     return await (db as any).select().from(jobRuns).orderBy(desc(jobRuns.startedAt)).limit(limit);
   }
 
+  async getJobRun(id: number): Promise<JobRun | undefined> {
+    const rows = await (db as any).select().from(jobRuns).where(eq(jobRuns.id, id)).limit(1);
+    return rows[0];
+  }
+
   async insertNotification(input: InsertNotification): Promise<Notification> {
     const rows = await (db as any).insert(notifications).values(input).returning();
     return rows[0];
