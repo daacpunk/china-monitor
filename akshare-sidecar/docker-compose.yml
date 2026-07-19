@@ -12,6 +12,16 @@ services:
     image: akshare-sidecar
     container_name: akshare-sidecar
     restart: unless-stopped
+    # Cap memory so an OOM kills ONLY this container (Docker then restarts it
+    # cleanly) instead of wedging the whole 1GB VPS. Tune via .env if needed.
+    mem_limit: "${SIDECAR_MEM_LIMIT:-700m}"
+    mem_reservation: "${SIDECAR_MEM_RESERVATION:-256m}"
+    labels:
+      # Autoheal force-restarts this container whenever its healthcheck reports
+      # UNHEALTHY. `restart: unless-stopped` alone only reacts to process EXIT,
+      # not to a hung-but-alive process (the failure seen 2026-07: port bound,
+      # HTTP hung, no auto-recovery). This closes that gap.
+      autoheal: "true"
     ports:
       # host:container — change the host port if 8000 is taken.
       - "${HOST_PORT:-8000}:8000"
@@ -33,3 +43,18 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Watches all containers labeled autoheal=true and restarts any that go
+  # UNHEALTHY. Tiny (~10MB). Needs the Docker socket read-only to poll status.
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: akshare-autoheal
+    restart: unless-stopped
+    mem_limit: "64m"
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "15"      # check every 15s
+      AUTOHEAL_START_PERIOD: "30"  # grace before first check
+      CURL_TIMEOUT: "10"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

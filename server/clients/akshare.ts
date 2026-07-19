@@ -424,13 +424,22 @@ export async function getCrossAssetYields(
   }
 }
 
-/** Health check — useful for debug routes / startup probe. */
-export async function getAkshareHealth(): Promise<{ ok: boolean; detail: any }> {
+/** Health check — useful for debug routes / startup probe. Timed out so a hung
+ *  sidecar (TCP open but HTTP not responding) can't block the caller. */
+export async function getAkshareHealth(timeoutMs = 8000): Promise<{ ok: boolean; detail: any }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${SIDECAR_URL}/health`, { headers: { Accept: "application/json" } });
+    const r = await fetch(`${SIDECAR_URL}/health`, {
+      headers: { Accept: "application/json" },
+      signal: ctrl.signal,
+    });
     const body = await r.json();
     return { ok: r.ok, detail: body };
   } catch (err: any) {
-    return { ok: false, detail: { error: err.message } };
+    const msg = err?.name === "AbortError" ? `timeout after ${timeoutMs}ms (sidecar not responding)` : err.message;
+    return { ok: false, detail: { error: msg } };
+  } finally {
+    clearTimeout(t);
   }
 }

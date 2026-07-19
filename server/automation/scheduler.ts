@@ -213,6 +213,46 @@ export async function runDueJobs(now = new Date()): Promise<{ ran: boolean; reas
   return { ran: true };
 }
 
+/**
+ * Sidecar uptime monitor. Alerts on STATE TRANSITIONS only (down once, recovered
+ * once) so a prolonged outage doesn't spam notifications every tick. Requires
+ * two consecutive failures before alerting to avoid flapping on a transient blip.
+ */
+let sidecarDown = false;
+let consecutiveFailures = 0;
+async function monitorSidecar(): Promise<void> {
+  try {
+    const { getAkshareHealth } = await import("../clients/akshare");
+    const h = await getAkshareHealth(8000);
+    if (h.ok) {
+      if (sidecarDown) {
+        await notify({
+          title: "AKShare sidecar recovered",
+          body: "The AKShare data sidecar is responding again. Live A-share valuations, flows, earnings and index data are restored.",
+          kind: "info",
+          link: "/#/diagnostics",
+        });
+      }
+      sidecarDown = false;
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures++;
+      if (consecutiveFailures >= 2 && !sidecarDown) {
+        sidecarDown = true;
+        const detail = typeof h.detail?.error === "string" ? h.detail.error : "no response";
+        await notify({
+          title: "AKShare sidecar DOWN",
+          body: `The AKShare data sidecar is not responding (${detail}). A-share valuations, flows, earnings and index data will be stale until it recovers. Autoheal should restart it; if not, restart on the VPS: docker compose restart.`,
+          kind: "job_failed",
+          link: "/#/diagnostics",
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[scheduler] sidecar monitor error", err);
+  }
+}
+
 /** In-process tick loop, started at server boot. Cheap; re-reads state each tick. */
 let timer: NodeJS.Timeout | null = null;
 export function startScheduler(): void {
@@ -220,9 +260,10 @@ export function startScheduler(): void {
   const TICK_MS = 15 * 60 * 1000; // 15 min
   const tick = async () => {
     try { await runDueJobs(); } catch (err) { console.error("[scheduler] tick error", err); }
+    await monitorSidecar();
   };
   // first tick shortly after boot, then every 15 min
   setTimeout(tick, 30_000);
   timer = setInterval(tick, TICK_MS);
-  console.log("[scheduler] started (15-min tick)");
+  console.log("[scheduler] started (15-min tick + sidecar monitor)");
 }
