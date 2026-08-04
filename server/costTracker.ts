@@ -1,6 +1,6 @@
 import { storage } from "./storage";
 
-export const SERVICES = ["ceic", "sonar", "anthropic", "deepseek"] as const;
+export const SERVICES = ["ceic", "sonar", "anthropic", "deepseek", "openrouter"] as const;
 export type Service = (typeof SERVICES)[number];
 
 export function currentYearMonth(): string {
@@ -91,6 +91,18 @@ export const PRICING = {
   // DeepSeek (cache-miss pricing, V3)
   "deepseek-chat": { inputPerMTok: 0.27, outputPerMTok: 1.10 },
   "deepseek-reasoner": { inputPerMTok: 0.55, outputPerMTok: 2.19 },
+  // OpenRouter — keyed by friendly `or-*` id (same convention as DeepSeek).
+  // Only models we have no direct key for; no Anthropic/DeepSeek here.
+  "or-gpt-5.6": { inputPerMTok: 5.0, outputPerMTok: 30.0 },
+  "or-gpt-5.6-mini": { inputPerMTok: 1.0, outputPerMTok: 6.0 },
+  "or-gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10.0 },
+  "or-gemini-2.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  "or-grok-4.5": { inputPerMTok: 2.0, outputPerMTok: 6.0 },
+  "or-glm-5.2": { inputPerMTok: 0.76, outputPerMTok: 2.42 },
+  "or-kimi-k3": { inputPerMTok: 3.0, outputPerMTok: 15.0 },
+  "or-qwen-3.8-max": { inputPerMTok: 2.0, outputPerMTok: 6.0 },
+  "or-minimax-m3": { inputPerMTok: 0.3, outputPerMTok: 1.2 },
+  "or-llama-4-maverick": { inputPerMTok: 0.2, outputPerMTok: 0.8 },
   // CEIC — per call (estimate; user confirmed call-cap based)
   "ceic-default": { perRequest: 0.01 },
 };

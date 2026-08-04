@@ -15,7 +15,7 @@
 
 import crypto from "node:crypto";
 import { querySonar, parseJsonArray } from "../clients/sonar";
-import { generateCommentary } from "../analysis/llm";
+import { generateCommentary, type LlmModel } from "../analysis/llm";
 import { storage } from "../storage";
 import {
   CHANNELS_BY_ID,
@@ -118,7 +118,7 @@ interface Enrichment {
 export async function classifyAndScore(
   channel: PolicyChannel,
   item: RawPolicyItem,
-  model: "claude-haiku-4" | "deepseek-chat" = "claude-haiku-4",
+  model: LlmModel = "claude-haiku-4",
 ): Promise<Enrichment> {
   const targetList = EQUITY_TARGETS.map((t) => `${t.id} (${t.label})`).join(", ");
   const system =
@@ -195,7 +195,7 @@ export interface ScanReport {
 export async function scanAndStore(
   channelId: string,
   sinceDays = 30,
-  classifyModel: "claude-haiku-4" | "deepseek-chat" = "claude-haiku-4",
+  classifyModel: LlmModel = "claude-haiku-4",
 ): Promise<ScanReport> {
   const channel = CHANNELS_BY_ID[channelId];
   if (!channel) return { channelId, found: 0, inserted: 0, skipped: 0, error: "unknown channel" };
@@ -244,7 +244,7 @@ export async function scanAndStore(
 export async function scanChannels(
   channelIds: string[],
   sinceDays = 30,
-  classifyModel: "claude-haiku-4" | "deepseek-chat" = "claude-haiku-4",
+  classifyModel: LlmModel = "claude-haiku-4",
 ): Promise<ScanReport[]> {
   const reports: ScanReport[] = [];
   for (const id of channelIds) {

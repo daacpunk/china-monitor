@@ -26,7 +26,9 @@ import {
 } from "lucide-react";
 
 type Mode = "data_driven" | "thesis_driven";
-type ModelId = "claude-sonnet-4" | "claude-haiku-4" | "deepseek-chat" | "deepseek-reasoner";
+type ModelId = "claude-sonnet-4" | "claude-haiku-4" | "deepseek-chat" | "deepseek-reasoner"
+  | "or-gpt-5.6" | "or-gpt-5.6-mini" | "or-gemini-2.5-pro" | "or-gemini-2.5-flash" | "or-grok-4.5"
+  | "or-glm-5.2" | "or-kimi-k3" | "or-qwen-3.8-max" | "or-minimax-m3" | "or-llama-4-maverick";
 const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer"] as const;
 
 interface AutomationConfig {
@@ -361,10 +363,26 @@ export default function Automation() {
           <div>
             <label className="mb-1 block text-xs font-medium uppercase text-muted-foreground">Synthesis model</label>
             <select value={cfg.model} onChange={(e) => update({ model: e.target.value as ModelId })} className="rounded-md border bg-background px-2 py-1 text-sm" data-testid="select-model">
-              <option value="claude-sonnet-4">Claude Sonnet 4.6 (default)</option>
-              <option value="claude-haiku-4">Claude Haiku 4.5 (cheaper)</option>
-              <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-              <option value="deepseek-chat">DeepSeek Chat</option>
+              <optgroup label="Anthropic">
+                <option value="claude-sonnet-4">Claude Sonnet 4.6 (default)</option>
+                <option value="claude-haiku-4">Claude Haiku 4.5 (cheaper)</option>
+              </optgroup>
+              <optgroup label="DeepSeek">
+                <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+              </optgroup>
+              <optgroup label="OpenRouter">
+                <option value="or-gpt-5.6">GPT-5.6 (Sol)</option>
+                <option value="or-gpt-5.6-mini">GPT-5.6 mini (Terra)</option>
+                <option value="or-gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="or-gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="or-grok-4.5">Grok 4.5</option>
+                <option value="or-glm-5.2">GLM 5.2</option>
+                <option value="or-kimi-k3">Kimi K3</option>
+                <option value="or-qwen-3.8-max">Qwen 3.8 Max</option>
+                <option value="or-minimax-m3">MiniMax M3</option>
+                <option value="or-llama-4-maverick">Llama 4 Maverick</option>
+              </optgroup>
             </select>
           </div>
           <Button

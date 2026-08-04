@@ -19,6 +19,7 @@ const SERVICES = [
   { id: "sonar",    name: "Perplexity Sonar Pro", docs: "https://docs.perplexity.ai/",  hint: "Generate at perplexity.ai/account/api" },
   { id: "anthropic", name: "Anthropic Claude", docs: "https://docs.anthropic.com/",     hint: "Generate at console.anthropic.com/keys" },
   { id: "deepseek", name: "DeepSeek",        docs: "https://api-docs.deepseek.com/",    hint: "Generate at platform.deepseek.com/api_keys" },
+  { id: "openrouter", name: "OpenRouter",   docs: "https://openrouter.ai/docs",         hint: "One key for GPT, Gemini, Grok, GLM, Kimi, Qwen, MiniMax, Llama. Get it at openrouter.ai/keys." },
   { id: "fred",     name: "FRED (St. Louis Fed)", docs: "https://fred.stlouisfed.org/docs/api/api_key.html", hint: "Free key — register at fred.stlouisfed.org. Required for China CPI/PPI/PMI/IP when NBS is unreachable from overseas (Railway/EU/US hosting)." },
 ];
 

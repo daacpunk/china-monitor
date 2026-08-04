@@ -8,8 +8,9 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { generateStrategyNote, regenerateSection, type GenerateOpts } from "./strategyNote";
 import { proposeHouseView } from "./houseView";
+import { LLM_MODEL_IDS } from "../analysis/modelIds";
 
-const MODEL_ENUM = z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]);
+const MODEL_ENUM = z.enum(LLM_MODEL_IDS);
 
 export function registerReportRoutes(app: Express): void {
   // ── House view ──────────────────────────────────────────────────────────────

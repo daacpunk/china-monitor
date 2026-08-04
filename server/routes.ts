@@ -15,6 +15,7 @@ import { listRegistry } from "./series/registry";
 import { searchSeries } from "./clients/ceic";
 import { getUpcomingReleases, getAllReleases } from "./clients/calendar";
 import { resolveApiKey } from "./keyResolver";
+import { LLM_MODEL_IDS } from "./analysis/modelIds";
 import { POLICY_CHANNELS, COVERAGE_THEMES, TECH_CHANNEL_IDS } from "./policy/channels";
 import { scanChannels, EQUITY_TARGETS } from "./policy/service";
 import { PERSONAS, PERSONAS_BY_ID, DEFAULT_REDTEAM_PANEL } from "@shared/personas";
@@ -767,7 +768,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const Body = z.object({
         logicalId: z.string().min(1),
         model: z
-          .enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"])
+          .enum(LLM_MODEL_IDS)
           .optional(),
         question: z.string().max(500).optional(),
         contextIds: z.array(z.string()).max(4).optional(),
@@ -1077,7 +1078,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/scenarios/generate", async (req, res) => {
     try {
       const Body = z.object({
-        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        model: z.enum(LLM_MODEL_IDS).optional(),
         drivers: z.array(z.string()).optional(),
         equities: z.array(z.string()).optional(),
         targetQuarter: z.string().regex(/^\d{4}-Q[1-4]$/).optional(),
@@ -1208,7 +1209,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/brief/generate", async (req, res) => {
     try {
       const Body = z.object({
-        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        model: z.enum(LLM_MODEL_IDS).optional(),
         drivers: z.array(z.string()).optional(),
         crossAsset: z.array(z.string()).optional(),
         equities: z.array(z.string()).optional(),
@@ -1374,7 +1375,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         channels: z.array(z.string()).optional(),
         sinceDays: z.number().int().min(1).max(120).optional(),
         lens: z.enum(["tech", "macro", "all"]).optional(),
-        classifyModel: z.enum(["claude-haiku-4", "deepseek-chat"]).optional(),
+        classifyModel: z.enum(LLM_MODEL_IDS).optional(),
       });
       const { channels, sinceDays, lens, classifyModel } = Body.parse(req.body ?? {});
       let ids = channels;
@@ -1406,7 +1407,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         personaId: z.string(),
         context: z.string().min(1).max(40000),
         focusHint: z.string().max(400).optional(),
-        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        model: z.enum(LLM_MODEL_IDS).optional(),
       });
       const { personaId, context, focusHint, model } = Body.parse(req.body);
       if (!PERSONAS_BY_ID[personaId]) return res.status(404).json({ error: "Unknown persona" });
@@ -1438,7 +1439,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         context: z.string().max(40000).optional(),
         panel: z.array(z.string()).optional(),
         focusHint: z.string().max(400).optional(),
-        model: z.enum(["claude-sonnet-4", "claude-haiku-4", "deepseek-chat", "deepseek-reasoner"]).optional(),
+        model: z.enum(LLM_MODEL_IDS).optional(),
       });
       const { baseThesis, context, panel, focusHint, model } = Body.parse(req.body);
       const { generateCommentary } = await import("./analysis/llm");

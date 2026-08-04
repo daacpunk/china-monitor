@@ -14,21 +14,29 @@ import crypto from "node:crypto";
 import { resolveApiKey } from "../keyResolver";
 import { checkCeiling, recordCall, estimateCost, type Service } from "../costTracker";
 import { storage } from "../storage";
+import type { LlmModelId } from "./modelIds";
 
-export type LlmModel =
-  | "claude-sonnet-4"
-  | "claude-haiku-4"
-  | "deepseek-chat"
-  | "deepseek-reasoner";
+export type LlmModel = LlmModelId;
 
-const MODEL_META: Record<
+export const MODEL_META: Record<
   LlmModel,
-  { service: Service; provider: "anthropic" | "deepseek"; apiModel: string }
+  { service: Service; provider: "anthropic" | "deepseek" | "openrouter"; apiModel: string }
 > = {
   "claude-sonnet-4":    { service: "anthropic", provider: "anthropic", apiModel: "claude-sonnet-4-6" },
   "claude-haiku-4":     { service: "anthropic", provider: "anthropic", apiModel: "claude-haiku-4-5" },
   "deepseek-chat":      { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-chat" },
   "deepseek-reasoner":  { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-reasoner" },
+  // ─── OpenRouter (one key, models we have no direct key for) ───────
+  "or-gpt-5.6":         { service: "openrouter", provider: "openrouter", apiModel: "openai/gpt-5.6-sol" },
+  "or-gpt-5.6-mini":    { service: "openrouter", provider: "openrouter", apiModel: "openai/gpt-5.6-terra" },
+  "or-gemini-2.5-pro":  { service: "openrouter", provider: "openrouter", apiModel: "google/gemini-2.5-pro" },
+  "or-gemini-2.5-flash":{ service: "openrouter", provider: "openrouter", apiModel: "google/gemini-2.5-flash" },
+  "or-grok-4.5":        { service: "openrouter", provider: "openrouter", apiModel: "x-ai/grok-4.5" },
+  "or-glm-5.2":         { service: "openrouter", provider: "openrouter", apiModel: "z-ai/glm-5.2" },
+  "or-kimi-k3":         { service: "openrouter", provider: "openrouter", apiModel: "moonshotai/kimi-k3" },
+  "or-qwen-3.8-max":    { service: "openrouter", provider: "openrouter", apiModel: "qwen/qwen3.8-max" },
+  "or-minimax-m3":      { service: "openrouter", provider: "openrouter", apiModel: "minimax/minimax-m3" },
+  "or-llama-4-maverick":{ service: "openrouter", provider: "openrouter", apiModel: "meta-llama/llama-4-maverick" },
 };
 
 export interface CommentaryRequest {
@@ -149,6 +157,44 @@ async function callDeepseek(
   };
 }
 
+async function callOpenRouter(
+  apiKey: string,
+  apiModel: string,
+  system: string,
+  user: string,
+  maxOutputTokens: number,
+): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://china-monitor-production.up.railway.app",
+      "X-Title": "China Monitor",
+    },
+    body: JSON.stringify({
+      model: apiModel,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      max_tokens: maxOutputTokens,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenRouter HTTP ${res.status}: ${body.slice(0, 400)}`);
+  }
+  const json: any = await res.json();
+  const text = json.choices?.[0]?.message?.content ?? "";
+  const usage = json.usage || {};
+  return {
+    text,
+    tokensIn: usage.prompt_tokens || 0,
+    tokensOut: usage.completion_tokens || 0,
+  };
+}
+
 // ─── Public entry ─────────────────────────────────────────────────────
 
 export async function generateCommentary(req: CommentaryRequest): Promise<CommentaryResult> {
@@ -184,7 +230,13 @@ export async function generateCommentary(req: CommentaryRequest): Promise<Commen
   const apiKey = await resolveApiKey(meta.service);
   if (!apiKey) {
     throw new Error(
-      `No API key configured for ${meta.service}. Set ${meta.service === "anthropic" ? "ANTHROPIC_API_KEY" : "DEEPSEEK_API_KEY"} on Railway, or save it on the Settings page.`,
+      `No API key configured for ${meta.service}. Set ${
+        meta.service === "anthropic"
+          ? "ANTHROPIC_API_KEY"
+          : meta.service === "openrouter"
+            ? "OPENROUTER_API_KEY"
+            : "DEEPSEEK_API_KEY"
+      } on Railway, or save it on the Settings page.`,
     );
   }
 
@@ -194,6 +246,8 @@ export async function generateCommentary(req: CommentaryRequest): Promise<Commen
   try {
     if (meta.provider === "anthropic") {
       result = await callAnthropic(apiKey, meta.apiModel, req.systemPrompt, req.userPrompt, maxOut);
+    } else if (meta.provider === "openrouter") {
+      result = await callOpenRouter(apiKey, meta.apiModel, req.systemPrompt, req.userPrompt, maxOut);
     } else {
       result = await callDeepseek(apiKey, meta.apiModel, req.systemPrompt, req.userPrompt, maxOut);
     }
