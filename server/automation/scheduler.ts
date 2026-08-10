@@ -18,6 +18,11 @@ import { generateStrategyNote } from "../report/strategyNote";
 import { proposeHouseView } from "../report/houseView";
 import { refreshReportSeries } from "./refresh";
 import { notify } from "./notify";
+import {
+  capturePredictionsForHouseView,
+  capturePredictionForNote,
+  resolveDuePredictions,
+} from "../analysis/trackRecord";
 import type { CoverageTheme } from "../equity/universe";
 
 const SETTINGS_KEY = "automation.schedule";
@@ -117,11 +122,14 @@ export async function runScheduledReport(kind: "scheduled" | "manual"): Promise<
         const existing = await storage.getHouseView();
         const changeLog: any[] = existing ? ((existing.changeLog as any[]) ?? []) : [];
         changeLog.unshift({ date: new Date().toISOString().slice(0, 10), change: proposal.changeSummary, trigger: `auto-update (${kind})` });
-        await storage.upsertHouseView({
+        const savedHv = await storage.upsertHouseView({
           headline: proposal.headline, stance: proposal.stance, conviction: proposal.conviction,
           horizon: proposal.horizon, pillars: proposal.pillars, keyRisks: proposal.keyRisks,
           sectorStance: proposal.sectorStance, changeLog,
         });
+        // Track record: log the auto-applied view as predictions (best-effort).
+        try { await capturePredictionsForHouseView(savedHv, cfg.model); }
+        catch (e) { console.error("[scheduler] prediction capture failed (non-fatal)", e); }
         t("house_view", s, true, "auto-applied");
       } else {
         // Propose-only: stash the proposal as a notification for review.
@@ -151,6 +159,9 @@ export async function runScheduledReport(kind: "scheduled" | "manual"): Promise<
       houseViewSnapshot: hv ?? null, citations: gen.citations, model: gen.model,
       costUsd: gen.costUsd, tokensIn: gen.tokensIn, tokensOut: gen.tokensOut, status: "draft",
     });
+    // Track record: a thesis verdict is a prediction (best-effort).
+    try { if (saved.thesisVerdict) await capturePredictionForNote(saved, { horizon: "2Q" }); }
+    catch (e) { console.error("[scheduler] thesis prediction capture failed (non-fatal)", e); }
     noteId = saved.id;
     t("generate", s, true, `note #${saved.id}, ${gen.sections.length} sections`);
 
@@ -261,9 +272,25 @@ export function startScheduler(): void {
   const tick = async () => {
     try { await runDueJobs(); } catch (err) { console.error("[scheduler] tick error", err); }
     await monitorSidecar();
+    // Track record: score any predictions whose horizon has elapsed. Cheap
+    // (usually zero due rows) and fully guarded — must never break the tick.
+    try {
+      const r = await resolveDuePredictions();
+      if (r.resolved > 0) {
+        console.log(`[scheduler] resolved ${r.resolved} prediction(s)`, r);
+        await notify({
+          title: `Track record updated: ${r.resolved} call${r.resolved === 1 ? "" : "s"} resolved`,
+          body: `${r.correct} correct, ${r.wrong} wrong, ${r.partial} partial.`,
+          kind: "info",
+          link: "/#/track-record",
+        });
+      }
+    } catch (err) {
+      console.error("[scheduler] track-record resolution error", err);
+    }
   };
   // first tick shortly after boot, then every 15 min
   setTimeout(tick, 30_000);
   timer = setInterval(tick, TICK_MS);
-  console.log("[scheduler] started (15-min tick + sidecar monitor)");
+  console.log("[scheduler] started (15-min tick + sidecar monitor + track-record resolution)");
 }

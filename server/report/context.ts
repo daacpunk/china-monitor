@@ -27,6 +27,7 @@ import { buildFlowsPositioning, flowsPositioningLine } from "../equity/flowsPosi
 import { buildPolicyTransmission, policyTransmissionDigest } from "../equity/policyTransmission";
 import { buildRelativeContext, relativeContextDigest } from "../equity/relativeContext";
 import { querySonar } from "../clients/sonar";
+import { trackRecordDigest } from "../analysis/trackRecord";
 import type { HouseView, PolicyUpdate } from "@shared/schema";
 
 export interface ReportContext {
@@ -36,6 +37,8 @@ export interface ReportContext {
   sectorDigest: string;
   houseView: HouseView | null;
   sonarDigest: string;
+  /** Self-scoring block: hit rate + a notable recently-resolved call. */
+  trackRecordDigest: string;
   citations: { name: string; url: string }[];
 }
 
@@ -290,11 +293,12 @@ export async function assembleContext(opts: {
     );
   }
 
-  const [macro, policy, sector, hv, ...sonars] = await Promise.all([
+  const [macro, policy, sector, hv, track, ...sonars] = await Promise.all([
     macroDigest(),
     policyDigest(emphasis),
     sectorDigest(emphasis, featuredNames),
     storage.getHouseView().catch(() => undefined),
+    trackRecordDigest().catch(() => ""),
     ...sonarTasks,
   ]);
 
@@ -313,6 +317,7 @@ export async function assembleContext(opts: {
     sectorDigest: sector,
     houseView: hv ?? null,
     sonarDigest: sonars.map((s) => s.text).filter(Boolean).join("\n\n"),
+    trackRecordDigest: track ?? "",
     citations: dedupCitations.slice(0, 60),
   };
 }
@@ -333,6 +338,8 @@ export function contextToPrompt(ctx: ReportContext): string {
     ctx.sectorDigest,
     "",
     ctx.sonarDigest,
+    "",
+    ctx.trackRecordDigest,
     "",
     hv,
     `=== END EVIDENCE BASE ===`,

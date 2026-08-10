@@ -694,6 +694,42 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
   // ════════════════ 5f. RELATIVE & GLOBAL CONTEXT (Gap F) ════════════════
   renderRelativeContextSection(pptx, model, { newSlide, heading, W, H });
 
+  // ════════════════ 5g. TRACK RECORD (self-scorecard) ════════════════
+  // Compact: overall hit rate + by-kind. Best-effort — an empty or failing
+  // scorecard simply omits the slide rather than breaking the export.
+  try {
+    const { storage } = await import("../storage");
+    const tr = await storage.trackRecordSummary();
+    if (tr.total > 0) {
+      const s = newSlide();
+      const pctS = (n: number | null) => (n == null ? "n/a" : `${(n * 100).toFixed(0)}%`);
+      heading(
+        s,
+        "Track Record",
+        `${tr.resolved} resolved · ${tr.open} open${tr.brier != null ? ` · Brier ${tr.brier.toFixed(3)}` : ""}`,
+      );
+      s.addText(pctS(tr.hitRate), { x: 0.5, y: 1.8, w: 3.2, h: 1.1, fontSize: 44, bold: true, color: ACCENT });
+      s.addText(`Overall hit rate\n(${tr.correct} correct / ${tr.wrong} wrong)`, { x: 0.5, y: 2.9, w: 3.2, h: 0.8, fontSize: 12, color: C.muted, valign: "top" });
+      const header: PptxGenJS.TableRow = ["Call type", "Hit rate", "Correct", "Wrong", "Partial"].map((t) => ({
+        text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 },
+      }));
+      const rows: PptxGenJS.TableRow[] = [header, ...tr.byKind.slice(0, 6).map((b) => [
+        { text: String(b.key).replace(/_/g, " "), options: { fontSize: 11, color: C.body } },
+        { text: pctS(b.hitRate), options: { fontSize: 11, color: C.body, bold: true } },
+        { text: String(b.correct), options: { fontSize: 11, color: C.positive } },
+        { text: String(b.wrong), options: { fontSize: 11, color: C.negative } },
+        { text: String(b.partial), options: { fontSize: 11, color: C.muted } },
+      ])];
+      s.addTable(rows, { x: 4.2, y: 1.8, w: W - 4.7, colW: [3.0, 1.6, 1.4, 1.4, 1.23], border: { type: "solid", color: C.line, pt: 1 }, valign: "middle" });
+      s.addText(
+        "Every house view and thesis is logged as a falsifiable call and auto-resolved against realized index returns (±2% flat band; sector calls scored vs CSI 300).",
+        { x: 0.5, y: 5.6, w: W - 1, h: 0.8, fontSize: 11, color: C.muted, valign: "top" },
+      );
+    }
+  } catch (err) {
+    console.error("[pptx] track-record slide skipped", err);
+  }
+
   // ════════════════ 6. SOURCES ════════════════
   if (model.citations.length) {
     const perSlide = 18;

@@ -9,6 +9,11 @@ import { storage } from "../storage";
 import { generateStrategyNote, regenerateSection, type GenerateOpts } from "./strategyNote";
 import { proposeHouseView } from "./houseView";
 import { LLM_MODEL_IDS } from "../analysis/modelIds";
+import {
+  capturePredictionsForHouseView,
+  capturePredictionForNote,
+  resolveDuePredictions,
+} from "../analysis/trackRecord";
 
 const MODEL_ENUM = z.enum(LLM_MODEL_IDS);
 
@@ -55,6 +60,13 @@ export function registerReportRoutes(app: Express): void {
         sectorStance: b.sectorStance,
         changeLog,
       });
+      // Track record: log this view as falsifiable predictions (index call +
+      // one relative call per sector stance). Best-effort — never block the save.
+      try {
+        await capturePredictionsForHouseView(hv, (req.body as any)?.model ?? "manual");
+      } catch (e) {
+        console.error("[house-view] prediction capture failed (non-fatal)", e);
+      }
       res.json({ houseView: hv });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -178,6 +190,12 @@ export function registerReportRoutes(app: Express): void {
             tokensOut: gen.tokensOut,
             status: "draft",
           });
+          // Track record: a thesis verdict is a prediction. Best-effort.
+          try {
+            if (saved.thesisVerdict) await capturePredictionForNote(saved, { horizon: "2Q" });
+          } catch (e) {
+            console.error("[report] thesis prediction capture failed (non-fatal)", e);
+          }
           await storage.updateJobRun(job.id, {
             status: "success", finishedAt: new Date(), noteId: saved.id, costUsd: gen.costUsd ?? 0,
             steps: [{ step: "generate", ok: true, detail: `note #${saved.id}` }],
@@ -202,6 +220,38 @@ export function registerReportRoutes(app: Express): void {
       const job = await storage.getJobRun(id);
       if (!job) return res.status(404).json({ error: "Not found" });
       res.json({ id: job.id, status: job.status, noteId: job.noteId ?? null, error: job.error ?? null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Track record / thesis scorecard ───────────────────────────────────
+  app.get("/api/track-record", async (_req, res) => {
+    try {
+      const [summary, predictions] = await Promise.all([
+        storage.trackRecordSummary(),
+        storage.listPredictions({ limit: 200 }),
+      ]);
+      res.json({ summary, predictions });
+    } catch (err: any) {
+      // Never throw on an empty/absent scorecard — return an empty shape.
+      console.error("[track-record] summary failed", err);
+      res.json({
+        summary: {
+          total: 0, open: 0, resolved: 0, correct: 0, wrong: 0, partial: 0,
+          hitRate: null, brier: null, brierN: 0, byKind: [], byModel: [],
+        },
+        predictions: [],
+        error: err?.message ?? String(err),
+      });
+    }
+  });
+
+  /** Force a resolution pass (the scheduler tick does this every 15 min). */
+  app.post("/api/track-record/resolve", async (_req, res) => {
+    try {
+      const result = await resolveDuePredictions();
+      res.json({ result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

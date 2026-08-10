@@ -15,6 +15,7 @@ import {
   strategyNotes,
   jobRuns,
   notifications,
+  predictions,
 } from "@shared/schema";
 import type {
   ApiKey,
@@ -48,8 +49,10 @@ import type {
   InsertJobRun,
   Notification,
   InsertNotification,
+  Prediction,
+  InsertPrediction,
 } from "@shared/schema";
-import { eq, desc, gte, and, sql } from "drizzle-orm";
+import { eq, desc, gte, lte, and, sql } from "drizzle-orm";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dual driver setup:
@@ -286,6 +289,23 @@ export async function bootstrapSchema(): Promise<void> {
       kind TEXT NOT NULL DEFAULT 'info'
     )`,
     `CREATE INDEX IF NOT EXISTS notifications_created_idx ON notifications(created_at)`,
+    `CREATE TABLE IF NOT EXISTS predictions (
+      id SERIAL PRIMARY KEY,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      kind TEXT NOT NULL,
+      source_id INTEGER,
+      model TEXT,
+      horizon TEXT NOT NULL DEFAULT '2Q',
+      resolve_at TIMESTAMP NOT NULL,
+      claim JSONB NOT NULL,
+      probability DOUBLE PRECISION,
+      anchor JSONB,
+      status TEXT NOT NULL DEFAULT 'open',
+      outcome TEXT,
+      realized JSONB,
+      scored_at TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS predictions_status_resolve_idx ON predictions(status, resolve_at)`,
   ];
   for (const s of stmts) {
     await (db as any).execute(sql.raw(s));
@@ -387,6 +407,36 @@ export interface IStorage {
   getLatestBrief(): Promise<Brief | undefined>;
   updateBriefNotes(id: number, userNotes: string): Promise<Brief | undefined>;
   countBriefsSince(sinceIso: string): Promise<number>;
+
+  // Track record / predictions
+  createPrediction(input: InsertPrediction): Promise<Prediction>;
+  listPredictions(opts?: { status?: string; kind?: string; model?: string; limit?: number }): Promise<Prediction[]>;
+  getDuePredictions(now?: Date): Promise<Prediction[]>;
+  resolvePrediction(id: number, patch: { outcome: string; realized: unknown; scoredAt?: Date }): Promise<Prediction | undefined>;
+  trackRecordSummary(): Promise<TrackRecordSummary>;
+}
+
+export interface TrackRecordBucket {
+  key: string;
+  correct: number;
+  wrong: number;
+  partial: number;
+  resolved: number;
+  hitRate: number | null;
+}
+
+export interface TrackRecordSummary {
+  total: number;
+  open: number;
+  resolved: number;
+  correct: number;
+  wrong: number;
+  partial: number;
+  hitRate: number | null;      // correct / (correct + wrong)
+  brier: number | null;        // over resolved predictions carrying a probability
+  brierN: number;
+  byKind: TrackRecordBucket[];
+  byModel: TrackRecordBucket[];
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1005,6 +1055,98 @@ export class DatabaseStorage implements IStorage {
 
   async markAllNotificationsRead(): Promise<void> {
     await (db as any).update(notifications).set({ read: true }).where(eq(notifications.read, false));
+  }
+
+  // ─── Track record / predictions ──────────────────────────────────────────
+  async createPrediction(input: InsertPrediction): Promise<Prediction> {
+    const rows = await (db as any).insert(predictions).values(input).returning();
+    return rows[0];
+  }
+
+  async listPredictions(
+    opts?: { status?: string; kind?: string; model?: string; limit?: number },
+  ): Promise<Prediction[]> {
+    const conds: any[] = [];
+    if (opts?.status) conds.push(eq(predictions.status, opts.status));
+    if (opts?.kind) conds.push(eq(predictions.kind, opts.kind));
+    if (opts?.model) conds.push(eq(predictions.model, opts.model));
+    let q: any = (db as any).select().from(predictions);
+    if (conds.length) q = q.where(and(...conds));
+    return await q.orderBy(desc(predictions.createdAt)).limit(opts?.limit ?? 200);
+  }
+
+  async getDuePredictions(now: Date = new Date()): Promise<Prediction[]> {
+    return await (db as any)
+      .select()
+      .from(predictions)
+      .where(and(eq(predictions.status, "open"), lte(predictions.resolveAt, now)))
+      .orderBy(predictions.resolveAt)
+      .limit(200);
+  }
+
+  async resolvePrediction(
+    id: number,
+    patch: { outcome: string; realized: unknown; scoredAt?: Date },
+  ): Promise<Prediction | undefined> {
+    const rows = await (db as any)
+      .update(predictions)
+      .set({
+        status: "resolved",
+        outcome: patch.outcome,
+        realized: patch.realized ?? null,
+        scoredAt: patch.scoredAt ?? new Date(),
+      })
+      .where(eq(predictions.id, id))
+      .returning();
+    return rows[0];
+  }
+
+  async trackRecordSummary(): Promise<TrackRecordSummary> {
+    let rows: Prediction[] = [];
+    try {
+      rows = await (db as any).select().from(predictions).limit(5000);
+    } catch {
+      rows = [];
+    }
+    const bucket = (key: string): TrackRecordBucket =>
+      ({ key, correct: 0, wrong: 0, partial: 0, resolved: 0, hitRate: null });
+    const byKind = new Map<string, TrackRecordBucket>();
+    const byModel = new Map<string, TrackRecordBucket>();
+    let correct = 0, wrong = 0, partial = 0, open = 0;
+    let brierSum = 0, brierN = 0;
+
+    for (const r of rows) {
+      if (r.status !== "resolved") { open++; continue; }
+      const kb = byKind.get(r.kind) ?? bucket(r.kind);
+      const mKey = r.model ?? "manual";
+      const mb = byModel.get(mKey) ?? bucket(mKey);
+      kb.resolved++; mb.resolved++;
+      if (r.outcome === "correct") { correct++; kb.correct++; mb.correct++; }
+      else if (r.outcome === "wrong") { wrong++; kb.wrong++; mb.wrong++; }
+      else { partial++; kb.partial++; mb.partial++; }
+      byKind.set(r.kind, kb);
+      byModel.set(mKey, mb);
+      if (typeof r.probability === "number" && (r.outcome === "correct" || r.outcome === "wrong")) {
+        const actual = r.outcome === "correct" ? 1 : 0;
+        brierSum += (r.probability - actual) ** 2;
+        brierN++;
+      }
+    }
+    const rate = (c: number, w: number) => (c + w > 0 ? c / (c + w) : null);
+    const finish = (b: TrackRecordBucket) => ({ ...b, hitRate: rate(b.correct, b.wrong) });
+    return {
+      total: rows.length,
+      open,
+      resolved: correct + wrong + partial,
+      correct,
+      wrong,
+      partial,
+      hitRate: rate(correct, wrong),
+      brier: brierN > 0 ? brierSum / brierN : null,
+      brierN,
+      byKind: Array.from(byKind.values()).map(finish).sort((a, b) => b.resolved - a.resolved),
+      byModel: Array.from(byModel.values()).map(finish).sort((a, b) => b.resolved - a.resolved),
+    };
   }
 
   async deleteImportedSeries(seriesId: string): Promise<number> {

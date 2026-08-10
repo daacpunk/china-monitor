@@ -23,6 +23,7 @@ import {
   Layers as SectorsIcon,
   FileText,
   CalendarClock,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -49,6 +50,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/attribution", label: "Attribution", icon: GitCompare, group: "Analysis" },
   { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
   { slug: "/brief", label: "Brief", icon: Newspaper, group: "Analysis" },
+  { slug: "/track-record", label: "Track Record", icon: Target, group: "Analysis" },
   // ─── Report group (Phase 3) ───
   { slug: "/report", label: "Strategy Report", icon: FileText, group: "Report" },
   { slug: "/automation", label: "Automation", icon: CalendarClock, group: "Report" },

@@ -406,3 +406,33 @@ export const notifications = pgTable(
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Track Record / Thesis Scorecard — every house view + thesis is logged as a
+// falsifiable prediction, auto-resolved on the scheduler tick against realized
+// index/sector outcomes, and scored (hit rate + Brier). No new data source:
+// resolution reuses the registry price series (csi300_monthly / hsi_close).
+// ─────────────────────────────────────────────────────────────────────────
+export const predictions = pgTable(
+  "predictions",
+  {
+    id: serial("id").primaryKey(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    kind: text("kind").notNull(),                    // house_view | sector_stance | thesis
+    sourceId: integer("source_id"),                  // house_view.id or strategy_notes.id
+    model: text("model"),
+    horizon: text("horizon").notNull().default("2Q"),// 1Q | 2Q | 1Y
+    resolveAt: timestamp("resolve_at").notNull(),
+    claim: jsonb("claim").notNull(),                 // structured claim (see trackRecord.ts)
+    probability: doublePrecision("probability"),     // nullable, for Brier
+    anchor: jsonb("anchor"),                         // baseline levels at creation
+    status: text("status").notNull().default("open"),// open | resolved
+    outcome: text("outcome"),                        // correct | wrong | partial
+    realized: jsonb("realized"),                     // what actually happened
+    scoredAt: timestamp("scored_at"),
+  },
+  (t) => ({ dueIdx: index("predictions_status_resolve_idx").on(t.status, t.resolveAt) }),
+);
+export const insertPredictionSchema = createInsertSchema(predictions).omit({ id: true, createdAt: true });
+export type InsertPrediction = z.infer<typeof insertPredictionSchema>;
+export type Prediction = typeof predictions.$inferSelect;
