@@ -1,16 +1,20 @@
 /**
- * Sonar Pro client — live web/news/policy research with citations.
+ * Perplexity web-research client.
  *
- * Uses the Perplexity Sonar API (chat/completions, model `sonar-pro`). The API
- * key is resolved via keyResolver("sonar") — confirmed by the user to be the SAME
- * key as their Perplexity API key (SONAR_API_KEY on Railway, or saved on Settings).
+ * Primary: Agent API  POST https://api.perplexity.ai/v1/agent
+ *   preset "low"  (= former sonar-pro) + explicit web_search (search is OFF
+ *   unless the tool is offered). Citations come from output[] search_results.
  *
- * Mirrors server/analysis/llm.ts exactly:
- *   cache check → ceiling check → key check → execute → record → cache.
- * Every call lands in the audit_log and counts against the `sonar` monthly ceiling.
+ * Fallback (until 2026-09-27): the legacy Sonar Chat Completions endpoint
+ *   POST https://api.perplexity.ai/chat/completions  model sonar-pro.
+ *   Sonar is shut down on that date. After it, only the Agent path remains.
+ *   Fallback fires on transport/HTTP/empty-text/failed-status so policy scan,
+ *   report digest, and name-news keep working through the migration window.
  *
- * Returns parsed text PLUS citations (search_results / citations), so anything that
- * flows into a brief/note/deck can be footnoted with a real source URL.
+ * Public API (querySonar / SonarResult / parseJsonArray) is UNCHANGED — call
+ * sites do not need to move.
+ *
+ * Key: resolveApiKey("sonar") = SONAR_API_KEY / Settings (same Perplexity key).
  */
 
 import crypto from "node:crypto";
@@ -18,8 +22,13 @@ import { resolveApiKey } from "../keyResolver";
 import { checkCeiling, recordCall, estimateCost } from "../costTracker";
 import { storage } from "../storage";
 
+const AGENT_URL = "https://api.perplexity.ai/v1/agent";
 const SONAR_URL = "https://api.perplexity.ai/chat/completions";
 const SONAR_MODEL = "sonar-pro";
+const AGENT_PRESET = "low";
+const AGENT_MODEL_LABEL = "agent-low"; // recorded in audit_log / cost
+/** Sonar Chat Completions is supported until this UTC date (inclusive). */
+const SONAR_SUNSET = new Date("2026-09-27T23:59:59Z");
 
 export interface SonarCitation {
   title?: string;
@@ -50,6 +59,10 @@ export interface SonarResult {
   fetchedAt: string;
 }
 
+function sonarFallbackAllowed(): boolean {
+  return Date.now() <= SONAR_SUNSET.getTime();
+}
+
 function promptHash(system: string, user: string, domains: string[], recency: string): string {
   return crypto
     .createHash("sha256")
@@ -78,64 +91,116 @@ async function setCached(key: string, value: SonarResult, ttlSeconds: number): P
   }
 }
 
-/** Normalize the various citation shapes Sonar can return into one list. */
+/** Normalize Sonar (top-level) and Agent API (output[] search_results) citation shapes. */
 function extractCitations(json: any): SonarCitation[] {
   const out: SonarCitation[] = [];
-  // Newer API: search_results[] with {title, url, date, snippet}
-  const sr = json?.search_results;
-  if (Array.isArray(sr)) {
-    for (const r of sr) {
-      if (r?.url) out.push({ title: r.title, url: r.url, date: r.date, snippet: r.snippet });
+  const push = (r: any) => {
+    const url = typeof r === "string" ? r : r?.url;
+    if (!url || out.some((e) => e.url === url)) return;
+    out.push({
+      title: typeof r === "string" ? undefined : r.title,
+      url,
+      date: typeof r === "string" ? undefined : r.date,
+      snippet: typeof r === "string" ? undefined : r.snippet,
+    });
+  };
+
+  // Agent API: typed output items
+  const output = json?.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (item?.type === "search_results" && Array.isArray(item.results)) {
+        for (const r of item.results) push(r);
+      }
+      if (item?.type === "fetch_url_results" && Array.isArray(item.contents)) {
+        for (const r of item.contents) push(r);
+      }
     }
   }
-  // Older API: citations[] = array of plain URL strings
-  const cites = json?.citations;
-  if (Array.isArray(cites)) {
-    for (const c of cites) {
-      const url = typeof c === "string" ? c : c?.url;
-      if (url && !out.some((e) => e.url === url)) out.push({ url });
-    }
+
+  // Legacy Sonar: top-level search_results / citations
+  if (Array.isArray(json?.search_results)) {
+    for (const r of json.search_results) push(r);
+  }
+  if (Array.isArray(json?.citations)) {
+    for (const c of json.citations) push(c);
   }
   return out;
 }
 
-export async function querySonar(req: SonarRequest): Promise<SonarResult> {
-  const domains = req.domains ?? [];
-  const recency = req.recency ?? "week";
-  const maxOut = req.maxOutputTokens ?? 1200;
-  const cacheKey = `sonar:${promptHash(req.systemPrompt, req.userPrompt, domains, recency)}`;
-  const ttl = req.cacheTtlSeconds ?? 86_400;
-
-  // 1. Cache check
-  const cached = await getCached(cacheKey);
-  if (cached) return cached;
-
-  // 2. Ceiling check
-  const ceiling = await checkCeiling("sonar");
-  if (!ceiling.allowed) {
-    await recordCall({
-      service: "sonar",
-      endpoint: "sonar/query",
-      actionContext: req.actionContext ?? null,
-      model: SONAR_MODEL,
-      tokensIn: 0,
-      tokensOut: 0,
-      costUsd: 0,
-      status: "blocked_by_ceiling",
-      errorMessage: ceiling.reason,
-    });
-    throw new Error(`Blocked by cost ceiling: ${ceiling.reason}`);
+/** Agent: output_text, else walk output[] message content[].text. Sonar: choices[0]. */
+function extractText(json: any): string {
+  if (typeof json?.output_text === "string" && json.output_text.trim()) return json.output_text;
+  const output = json?.output;
+  if (Array.isArray(output)) {
+    const parts: string[] = [];
+    for (const item of output) {
+      if (item?.type !== "message") continue;
+      const content = item.content;
+      if (typeof content === "string") parts.push(content);
+      else if (Array.isArray(content)) {
+        for (const c of content) {
+          if (typeof c?.text === "string") parts.push(c.text);
+        }
+      }
+    }
+    if (parts.length) return parts.join("\n");
   }
+  return json?.choices?.[0]?.message?.content ?? "";
+}
 
-  // 3. Key check
-  const apiKey = await resolveApiKey("sonar");
-  if (!apiKey) {
-    throw new Error(
-      "No API key configured for sonar. Set SONAR_API_KEY on Railway (same as your Perplexity API key), or save it on the Settings page.",
-    );
+function extractUsage(json: any): { tokensIn: number; tokensOut: number; billedCost: number | null } {
+  const u = json?.usage || {};
+  const tokensIn = Number(u.input_tokens ?? u.prompt_tokens ?? 0) || 0;
+  const tokensOut = Number(u.output_tokens ?? u.completion_tokens ?? 0) || 0;
+  const billed = u?.cost?.total_cost;
+  return {
+    tokensIn,
+    tokensOut,
+    billedCost: typeof billed === "number" && Number.isFinite(billed) ? billed : null,
+  };
+}
+
+async function postJson(url: string, apiKey: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const txt = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${txt.slice(0, 400)}`);
+  let json: any;
+  try { json = JSON.parse(txt); } catch {
+    throw new Error(`non-JSON response: ${txt.slice(0, 200)}`);
   }
+  // Agent API returns HTTP 200 for failed/cancelled runs — branch on status.
+  if (json?.status === "failed" || json?.status === "cancelled") {
+    const err = json?.error?.message || json?.error || json.status;
+    throw new Error(`agent status=${json.status}: ${err}`);
+  }
+  return json;
+}
 
-  // 4. Execute
+function agentBody(req: SonarRequest, domains: string[], recency: string, maxOut: number): Record<string, unknown> {
+  const filters: Record<string, unknown> = { search_recency_filter: recency };
+  if (domains.length > 0) filters.search_domain_filter = domains;
+  return {
+    preset: AGENT_PRESET,
+    instructions: req.systemPrompt,
+    input: req.userPrompt,
+    max_output_tokens: maxOut,
+    // Search is OFF unless web_search is offered. Force it — every call site
+    // (policy scan, report digest, name-news) is citation-critical.
+    tools: [{ type: "web_search", filters }],
+    tool_choice: { type: "web_search" },
+  };
+}
+
+function sonarBody(req: SonarRequest, domains: string[], recency: string, maxOut: number): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: SONAR_MODEL,
     max_tokens: maxOut,
@@ -147,52 +212,102 @@ export async function querySonar(req: SonarRequest): Promise<SonarResult> {
     search_recency_filter: recency,
   };
   if (domains.length > 0) body.search_domain_filter = domains;
+  return body;
+}
 
-  const t0 = Date.now();
-  let json: any;
-  try {
-    const res = await fetch(SONAR_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(45_000),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Sonar HTTP ${res.status}: ${txt.slice(0, 400)}`);
-    }
-    json = await res.json();
-  } catch (err: any) {
+export async function querySonar(req: SonarRequest): Promise<SonarResult> {
+  const domains = req.domains ?? [];
+  const recency = req.recency ?? "week";
+  // Agent "low" can spend tokens on the tool loop; don't starve the answer.
+  const maxOut = req.maxOutputTokens ?? 2400;
+  const cacheKey = `sonar:${promptHash(req.systemPrompt, req.userPrompt, domains, recency)}`;
+  const ttl = req.cacheTtlSeconds ?? 86_400;
+
+  const cached = await getCached(cacheKey);
+  if (cached) return cached;
+
+  const ceiling = await checkCeiling("sonar");
+  if (!ceiling.allowed) {
     await recordCall({
       service: "sonar",
       endpoint: "sonar/query",
       actionContext: req.actionContext ?? null,
-      model: SONAR_MODEL,
+      model: AGENT_MODEL_LABEL,
       tokensIn: 0,
       tokensOut: 0,
       costUsd: 0,
-      status: "error",
-      latencyMs: Date.now() - t0,
-      errorMessage: err.message,
+      status: "blocked_by_ceiling",
+      errorMessage: ceiling.reason,
     });
-    throw err;
+    throw new Error(`Blocked by cost ceiling: ${ceiling.reason}`);
   }
 
-  const text = json.choices?.[0]?.message?.content ?? "";
-  const usage = json.usage || {};
-  const tokensIn = usage.prompt_tokens || 0;
-  const tokensOut = usage.completion_tokens || 0;
-  const citations = extractCitations(json);
+  const apiKey = await resolveApiKey("sonar");
+  if (!apiKey) {
+    throw new Error(
+      "No API key configured for sonar. Set SONAR_API_KEY on Railway (same as your Perplexity API key), or save it on the Settings page.",
+    );
+  }
 
-  const cost = estimateCost("sonar-pro", tokensIn, tokensOut);
+  const t0 = Date.now();
+  let json: any;
+  let used: "agent" | "sonar" = "agent";
+  let lastErr: Error | null = null;
+
+  try {
+    json = await postJson(AGENT_URL, apiKey, agentBody(req, domains, recency, maxOut), 90_000);
+    if (!extractText(json).trim()) {
+      throw new Error("agent returned empty text");
+    }
+  } catch (err: any) {
+    lastErr = err instanceof Error ? err : new Error(String(err));
+    if (!sonarFallbackAllowed()) {
+      await recordCall({
+        service: "sonar",
+        endpoint: "agent/query",
+        actionContext: req.actionContext ?? null,
+        model: AGENT_MODEL_LABEL,
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0,
+        status: "error",
+        latencyMs: Date.now() - t0,
+        errorMessage: lastErr.message,
+      });
+      throw lastErr;
+    }
+    console.warn(`[sonar] Agent API failed (${lastErr.message.slice(0, 160)}); falling back to Sonar Chat Completions until ${SONAR_SUNSET.toISOString().slice(0, 10)}`);
+    try {
+      used = "sonar";
+      json = await postJson(SONAR_URL, apiKey, sonarBody(req, domains, recency, req.maxOutputTokens ?? 1200), 45_000);
+    } catch (fb: any) {
+      const msg = `agent: ${lastErr.message} | sonar-fallback: ${fb?.message ?? fb}`;
+      await recordCall({
+        service: "sonar",
+        endpoint: "sonar/query",
+        actionContext: req.actionContext ?? null,
+        model: AGENT_MODEL_LABEL,
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0,
+        status: "error",
+        latencyMs: Date.now() - t0,
+        errorMessage: msg,
+      });
+      throw new Error(msg);
+    }
+  }
+
+  const text = extractText(json);
+  const { tokensIn, tokensOut, billedCost } = extractUsage(json);
+  const citations = extractCitations(json);
+  const cost = billedCost ?? estimateCost("sonar-pro", tokensIn, tokensOut);
+
   await recordCall({
     service: "sonar",
-    endpoint: "sonar/query",
+    endpoint: used === "agent" ? "agent/query" : "sonar/query",
     actionContext: req.actionContext ?? null,
-    model: SONAR_MODEL,
+    model: used === "agent" ? AGENT_MODEL_LABEL : SONAR_MODEL,
     tokensIn,
     tokensOut,
     costUsd: cost,
@@ -220,11 +335,9 @@ export async function querySonar(req: SonarRequest): Promise<SonarResult> {
  */
 export function parseJsonArray<T = any>(text: string): T[] {
   if (!text) return [];
-  // Strip code fences
   let s = text.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
-  // Find first [ ... last ]
   const start = s.indexOf("[");
   const end = s.lastIndexOf("]");
   if (start === -1 || end === -1 || end < start) return [];

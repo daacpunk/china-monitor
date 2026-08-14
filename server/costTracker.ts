@@ -85,7 +85,8 @@ export const PRICING = {
   "claude-sonnet-4": { inputPerMTok: 3.0, outputPerMTok: 15.0 },
   "claude-opus-4": { inputPerMTok: 15.0, outputPerMTok: 75.0 },
   "claude-haiku-4": { inputPerMTok: 0.8, outputPerMTok: 4.0 },
-  // Perplexity Sonar Pro: $5 per 1k requests + token rates
+  // Perplexity Agent API preset "low" (ex-sonar-pro). Prefer billed usage.cost.total_cost
+  // when present; this estimate is the fallback. Search tool calls are extra (~$0.0025).
   "sonar-pro": { perRequest: 0.005, inputPerMTok: 3.0, outputPerMTok: 15.0 },
   "sonar": { perRequest: 0.001, inputPerMTok: 1.0, outputPerMTok: 1.0 },
   // DeepSeek (cache-miss pricing, V3)

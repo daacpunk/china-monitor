@@ -256,7 +256,7 @@ async function sonarDigest(
       maxOutputTokens: 900,
     });
     const citations = r.citations.map((c) => ({ name: c.title || c.url, url: c.url }));
-    return { text: r.text ? `WEB RESEARCH (Sonar Pro):\n${r.text}` : "", citations };
+    return { text: r.text ? `WEB RESEARCH (Perplexity):\n${r.text}` : "", citations };
   } catch (err: any) {
     return { text: `WEB RESEARCH: (unavailable: ${err.message})`, citations: [] };
   }

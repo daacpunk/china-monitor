@@ -16,7 +16,7 @@ import { useCeicHealth } from "@/hooks/useSeries";
 
 const SERVICES = [
   { id: "ceic",     name: "CEIC",            docs: "https://developer.isimarkets.com/", hint: "Set in CDMNext > User > API. Header: `Authorization: Bearer …`" },
-  { id: "sonar",    name: "Perplexity Sonar Pro", docs: "https://docs.perplexity.ai/",  hint: "Generate at perplexity.ai/account/api" },
+  { id: "sonar",    name: "Perplexity (Agent API)", docs: "https://docs.perplexity.ai/docs/agent-api/quickstart",  hint: "Same Perplexity API key. Agent API is primary; Sonar Chat Completions is fallback until 2026-09-27. Get a key at perplexity.ai/account/api" },
   { id: "anthropic", name: "Anthropic Claude", docs: "https://docs.anthropic.com/",     hint: "Generate at console.anthropic.com/keys" },
   { id: "deepseek", name: "DeepSeek",        docs: "https://api-docs.deepseek.com/",    hint: "Generate at platform.deepseek.com/api_keys" },
   { id: "openrouter", name: "OpenRouter",   docs: "https://openrouter.ai/docs",         hint: "One key for GPT, Gemini, Grok, GLM, Kimi, Qwen, MiniMax, Llama. Get it at openrouter.ai/keys." },

@@ -174,7 +174,7 @@ export function registerDiagnosticsRoutes(app: Express): void {
         { id: "eastmoney", label: "EastMoney", status: "ok", detail: "public endpoints" },
         {
           id: "sonar",
-          label: "Sonar (Perplexity)",
+          label: "Perplexity Agent API",
           status: sonarKey ? "ok" : "down",
           detail: sonarKey ? "key configured" : "no key",
         },
