@@ -1,0 +1,7 @@
+# Never commit credentials, collected data, or incremental state.
+.env
+state.json
+out/
+manifest.json
+__pycache__/
+*.pyc

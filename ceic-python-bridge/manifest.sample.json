@@ -1,0 +1,98 @@
+{
+  "_readme": [
+    "ALLOWLIST MANIFEST — copy to manifest.json and edit.",
+    "",
+    "Every seriesId below is a PLACEHOLDER. No real CEIC series IDs are shipped in this",
+    "repository: CEIC IDs are subscription-specific and inventing them would produce",
+    "silent garbage. Open CDMNext, find each indicator, copy its series ID, and paste it",
+    "in place of the <...> token. collector.py skips (and warns about) every entry whose",
+    "seriesId still looks like a placeholder.",
+    "",
+    "FIELDS",
+    "  seriesId   (required) CEIC series ID / mnemonic from CDMNext.",
+    "  label      Human label stored in the China Monitor catalog.",
+    "  unit       Free text, e.g. 'RMB bn', '% pa', '%YoY'.",
+    "  frequency  Daily | Weekly | Monthly | Quarterly | Annual — drives the staleness budget.",
+    "  geo        Country/region label.",
+    "  source     The ORIGINAL statistical agency (PBoC, NBS, CFETS, ...), not 'CEIC'.",
+    "  logicalId  Optional. Binds this CEIC series to a China Monitor registry series so",
+    "             it flows straight into the dashboards, strategy report, and PPTX deck.",
+    "             Must be a real registry ID (GET /api/series) or an 'imported:<id>' ID.",
+    "             Leave null to keep the series in the catalog only — it is still",
+    "             addressable as imported:<seriesId> and can be mapped later in the UI.",
+    "  transform  Optional: raw | yoy | divide_1000 | divide_100 | multiply_100.",
+    "",
+    "The six entries below are the highest-value CEIC-only indicators for this product:",
+    "total social financing, DR007, SHIBOR, property sales, retail sales, and industrial",
+    "profits. Only shibor_3m, retail_sales_yoy, policy_rate_7d and property_starts_ytd",
+    "exist in the current registry; the other two are catalog-only until you map them."
+  ],
+
+  "series": [
+    {
+      "seriesId": "<CEIC_SERIES_ID_TSF_STOCK>",
+      "label": "China: Total Social Financing: Stock",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "PBoC",
+      "logicalId": null,
+      "transform": null,
+      "_note": "TSF has no free fallback anywhere in China Monitor — this is the single highest-value CEIC series. Catalog-only until mapped; reachable as imported:<seriesId>."
+    },
+    {
+      "seriesId": "<CEIC_SERIES_ID_DR007>",
+      "label": "China: Interbank Repo Rate: DR007 (7-day, depository institutions)",
+      "unit": "% pa",
+      "frequency": "Daily",
+      "geo": "China",
+      "source": "CFETS",
+      "logicalId": "policy_rate_7d",
+      "transform": "raw",
+      "_note": "Maps onto the existing 7-day policy rate slot. Daily frequency ⇒ 10-day staleness budget; if the collector stops running, China Monitor falls back automatically."
+    },
+    {
+      "seriesId": "<CEIC_SERIES_ID_SHIBOR_3M>",
+      "label": "China: SHIBOR: 3 Month",
+      "unit": "% pa",
+      "frequency": "Daily",
+      "geo": "China",
+      "source": "National Interbank Funding Center",
+      "logicalId": "shibor_3m",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "<CEIC_SERIES_ID_PROPERTY_SALES_FLOOR_AREA>",
+      "label": "China: Commodity Building Sales: Floor Space Sold: YTD YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "NBS",
+      "logicalId": "property_starts_ytd",
+      "transform": "raw",
+      "_note": "Replace the logicalId with a dedicated property-sales registry ID if one is added; property_starts_ytd is the closest existing slot."
+    },
+    {
+      "seriesId": "<CEIC_SERIES_ID_RETAIL_SALES_YOY>",
+      "label": "China: Retail Sales of Consumer Goods: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "NBS",
+      "logicalId": "retail_sales_yoy",
+      "transform": "raw",
+      "_note": "AKShare/NBS already cover this. A fresh CEIC import wins; a stale one steps aside automatically."
+    },
+    {
+      "seriesId": "<CEIC_SERIES_ID_INDUSTRIAL_PROFITS_YTD_YOY>",
+      "label": "China: Industrial Enterprise: Total Profit: YTD YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "NBS",
+      "logicalId": null,
+      "transform": null,
+      "_note": "No registry slot yet — catalog-only, addressable as imported:<seriesId>, or map it in Imports → CEIC once a logical ID exists."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# CEIC Python bridge requirements
+#
+# The CEIC client is NOT on public PyPI. It is served from CEIC's own private
+# index and must be installed explicitly:
+#
+#   pip install --extra-index-url https://downloads.ceicdata.com/python ceic_api_client
+#
+# (Confirmed install command from CEIC's published Python tutorials — see
+#  README.md "Sources". It is deliberately NOT listed as a requirement below,
+#  because `pip install -r requirements.txt` would silently fail or resolve to
+#  an unrelated PyPI package. probe.py and collector.py detect the missing
+#  package and print the exact install command instead of pretending to work.)
+#
+# Everything the bridge itself needs is in the Python 3.9+ standard library
+# (json, csv, urllib, inspect). The only optional extra is dotenv, purely for
+# loading a local .env file.
+
+python-dotenv>=1.0.0 ; python_version >= "3.9"

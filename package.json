@@ -11,7 +11,10 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test:ceic": "tsx scripts/test-ceic-import.ts",
+    "test:ceic:integration": "tsx scripts/test-ceic-integration.ts",
+    "test:imports": "tsx scripts/test-factset-parser.ts && tsx scripts/test-ceic-import.ts && tsx scripts/test-ceic-integration.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.4.6",
@@ -85,6 +88,7 @@
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0"
   },

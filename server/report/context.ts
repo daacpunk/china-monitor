@@ -39,6 +39,13 @@ export interface ReportContext {
   sonarDigest: string;
   /** Self-scoring block: hit rate + a notable recently-resolved call. */
   trackRecordDigest: string;
+  /**
+   * Phase 7: one compact line describing how CEIC data reached this report
+   * (REST API vs CDMNext import vs local Python bridge), plus any stale-import
+   * caveat. Empty string when CEIC is not contributing, so the prompt stays
+   * clean for users who have not connected CEIC.
+   */
+  ceicDigest: string;
   citations: { name: string; url: string }[];
 }
 
@@ -240,6 +247,47 @@ async function sectorDigest(
   return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock + relativeBlock;
 }
 
+/**
+ * CEIC provenance line for the evidence base.
+ *
+ * The values themselves already flow into the report through fetchSeries (a
+ * mapped CEIC series simply wins the source race and is tagged
+ * `ceic_import`). This block exists so the model — and the reader of the
+ * deck's source slide — knows WHICH CEIC route produced them and whether any
+ * mapped series is running stale. Fully guarded: any failure yields "".
+ */
+async function ceicDigest(): Promise<string> {
+  try {
+    const { getCeicStatus } = await import("../clients/ceicSource");
+    const s = await getCeicStatus();
+    if (s.mode === "unavailable" || s.mappedCount === 0) return "";
+    const routeLabel =
+      s.mode === "api"
+        ? "CEIC REST API (entitled key)"
+        : s.mode === "python_bridge"
+          ? "CEIC local Python bridge (website credentials, collected off-platform)"
+          : "CEIC CDMNext Excel/CSV import";
+    const lines = [
+      `DATA PROVENANCE — CEIC: ${s.mappedCount} of ${s.catalogCount} catalog series are mapped to China Monitor logical IDs via ${routeLabel}.`,
+      `  Latest observation ${s.latestObservationDate ?? "n/a"}; latest import ${s.latestImportAt?.slice(0, 10) ?? "n/a"}; ${s.vintageCount} vintage rows retained (${s.seriesWithVintages} series show revisions).`,
+    ];
+    if (s.staleSeries.length) {
+      const worst = s.staleSeries
+        .slice()
+        .sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0))
+        .slice(0, 5)
+        .map((x) => `${x.logicalId} (last ${x.lastDate ?? "n/a"}${x.ageDays != null ? `, ${x.ageDays}d` : ""})`)
+        .join("; ");
+      lines.push(
+        `  DATA QUALITY: ${s.staleSeries.length} mapped CEIC series are stale and have been DEFERRED to free fallbacks (AKShare/FRED/NBS/OECD) where those are fresher: ${worst}. Treat any CEIC-sourced figure for these as provisional and say so in the note.`,
+      );
+    }
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 async function sonarDigest(
   query: string,
   actionContext: string,
@@ -293,12 +341,13 @@ export async function assembleContext(opts: {
     );
   }
 
-  const [macro, policy, sector, hv, track, ...sonars] = await Promise.all([
+  const [macro, policy, sector, hv, track, ceic, ...sonars] = await Promise.all([
     macroDigest(),
     policyDigest(emphasis),
     sectorDigest(emphasis, featuredNames),
     storage.getHouseView().catch(() => undefined),
     trackRecordDigest().catch(() => ""),
+    ceicDigest().catch(() => ""),
     ...sonarTasks,
   ]);
 
@@ -318,6 +367,7 @@ export async function assembleContext(opts: {
     houseView: hv ?? null,
     sonarDigest: sonars.map((s) => s.text).filter(Boolean).join("\n\n"),
     trackRecordDigest: track ?? "",
+    ceicDigest: (ceic as string) ?? "",
     citations: dedupCitations.slice(0, 60),
   };
 }
@@ -341,7 +391,11 @@ export function contextToPrompt(ctx: ReportContext): string {
     "",
     ctx.trackRecordDigest,
     "",
+    ctx.ceicDigest,
+    "",
     hv,
     `=== END EVIDENCE BASE ===`,
-  ].join("\n");
+  ]
+    .filter((block, i, arr) => block !== "" || arr[i - 1] !== "")
+    .join("\n");
 }

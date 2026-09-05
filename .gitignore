@@ -25,3 +25,11 @@ akshare-sidecar/.venv/
 akshare-sidecar/__pycache__/
 akshare-sidecar/*.pyc
 /tmp/akshare.log
+
+# CEIC Python bridge — credentials, collected data, incremental state
+ceic-python-bridge/.env
+ceic-python-bridge/state.json
+ceic-python-bridge/out/
+ceic-python-bridge/manifest.json
+ceic-python-bridge/.venv/
+ceic-python-bridge/__pycache__/

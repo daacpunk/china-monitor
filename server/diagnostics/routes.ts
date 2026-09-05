@@ -63,6 +63,36 @@ function maskUrl(url: string): string {
   }
 }
 
+/**
+ * Honest, mode-aware CEIC limitation text.
+ *
+ * Replaces the old hardcoded "current subscription denies the search API"
+ * line, which was wrong whenever the user is on the CDM-import or
+ * Python-bridge path.
+ */
+function ceicLimitation(ceic: any): string {
+  const mode = ceic?.mode ?? "unavailable";
+  if (mode === "api") {
+    return "CEIC: REST API entitled and in use as the primary source for mapped series.";
+  }
+  if (mode === "cdm_import" || mode === "python_bridge") {
+    const via = mode === "cdm_import" ? "CDMNext Excel/CSV export" : "local Python bridge";
+    const stale = ceic?.staleSeries?.length ?? 0;
+    return (
+      `CEIC: no REST data entitlement on the current key, so CEIC arrives via ${via} ` +
+      `(${ceic?.mappedCount ?? 0} of ${ceic?.catalogCount ?? 0} catalog series mapped to logical IDs` +
+      (stale ? `, ${stale} stale and currently deferring to free fallbacks` : "") +
+      "). AKShare/FRED/NBS/OECD still cover every unmapped series."
+    );
+  }
+  return (
+    "CEIC: not yet connected. The API key (if any) has no data entitlement — " +
+    "upload a CDMNext Excel/CSV export on the Imports page or run the local " +
+    "Python bridge (ceic-python-bridge/) to start populating the catalog. " +
+    "AKShare/FRED/NBS/OECD cover the gaps meanwhile."
+  );
+}
+
 interface CacheEntry { at: number; payload: any }
 let cache: CacheEntry | null = null;
 const TTL_MS = 60_000;
@@ -88,6 +118,7 @@ export function registerDiagnosticsRoutes(app: Express): void {
         jobs,
         seriesResults,
         auditSummary,
+        ceicStatus,
       ] = await Promise.all([
         getAkshareHealth().catch((e) => ({ ok: false, detail: { error: e.message } })),
         resolveApiKey("ceic").catch(() => null),
@@ -114,6 +145,11 @@ export function registerDiagnosticsRoutes(app: Express): void {
               label: s.label,
               category: s.category,
               source: (r.provenance as any)?.source ?? "unknown",
+              // Phase 7: distinguish CEIC REST from CDM import vs Python bridge.
+              sourceMode: (r.provenance as any)?.mode ?? null,
+              ceicSeriesId: (r.provenance as any)?.ceicSeriesId ?? null,
+              vintageDate: (r.provenance as any)?.vintageDate ?? null,
+              qualityNote: (r.provenance as any)?.qualityNote ?? null,
               lastDate,
               ageDays: age,
               status,
@@ -124,6 +160,9 @@ export function registerDiagnosticsRoutes(app: Express): void {
         storage
           .getMonthlyCostByService(currentYearMonth())
           .catch(() => [] as any[]),
+        import("../clients/ceicSource")
+          .then((m) => m.getCeicStatus())
+          .catch((e) => ({ mode: "unavailable", summary: `CEIC status probe failed: ${e.message}`, lastError: e.message } as any)),
       ]);
 
       const sidecar = sidecarRes as any;
@@ -149,6 +188,7 @@ export function registerDiagnosticsRoutes(app: Express): void {
       series.sort((a, b) => rank(a.status) - rank(b.status));
 
       const fred = fredHealthRes as any;
+      const ceic = ceicStatus as any;
 
       const sources = [
         {
@@ -162,8 +202,31 @@ export function registerDiagnosticsRoutes(app: Express): void {
         {
           id: "ceic",
           label: "CEIC",
-          status: ceicKey ? "degraded" : "down",
-          detail: ceicKey ? "key configured; search API denied on tier" : "no key",
+          // Phase 7: report the ACTUAL source mode rather than assuming REST.
+          // `api` = entitled key; `cdm_import`/`python_bridge` = data is
+          // flowing via CDMNext export or the local collector; `unavailable`
+          // = nothing configured yet.
+          status:
+            ceic.mode === "api" || ceic.mode === "python_bridge" || ceic.mode === "cdm_import"
+              ? ceic.staleSeries?.length
+                ? "degraded"
+                : "ok"
+              : "down",
+          detail: ceic.summary ?? "",
+          mode: ceic.mode,
+          apiKeyConfigured: !!ceic.apiKeyConfigured || !!ceicKey,
+          apiUsable: !!ceic.apiUsable,
+          bridgeTokenConfigured: !!ceic.bridgeTokenConfigured,
+          catalogCount: ceic.catalogCount ?? 0,
+          mappedCount: ceic.mappedCount ?? 0,
+          observationCount: ceic.observationCount ?? 0,
+          vintageCount: ceic.vintageCount ?? 0,
+          staleCount: ceic.staleSeries?.length ?? 0,
+          freshCount: ceic.freshSeriesCount ?? 0,
+          latestObservationDate: ceic.latestObservationDate ?? null,
+          latestImportAt: ceic.latestImportAt ?? null,
+          recentImports: ceic.recentFiles ?? [],
+          lastError: ceic.lastError ?? null,
         },
         {
           id: "fred",
@@ -229,10 +292,33 @@ export function registerDiagnosticsRoutes(app: Express): void {
         series,
         costs,
         automation,
+        // Phase 7: full CEIC picture (mode, catalog, mappings, vintages,
+        // freshness) so the Diagnostics page can render the import bridge.
+        ceic: {
+          mode: ceic.mode ?? "unavailable",
+          overrideMode: ceic.overrideMode ?? "auto",
+          apiKeyConfigured: !!ceic.apiKeyConfigured,
+          apiKeyTestStatus: ceic.apiKeyTestStatus ?? null,
+          apiUsable: !!ceic.apiUsable,
+          bridgeTokenConfigured: !!ceic.bridgeTokenConfigured,
+          catalogCount: ceic.catalogCount ?? 0,
+          mappedCount: ceic.mappedCount ?? 0,
+          observationCount: ceic.observationCount ?? 0,
+          vintageCount: ceic.vintageCount ?? 0,
+          seriesWithVintages: ceic.seriesWithVintages ?? 0,
+          freshSeriesCount: ceic.freshSeriesCount ?? 0,
+          staleSeries: ceic.staleSeries ?? [],
+          latestObservationDate: ceic.latestObservationDate ?? null,
+          latestVintageDate: ceic.latestVintageDate ?? null,
+          latestImportAt: ceic.latestImportAt ?? null,
+          recentImports: ceic.recentFiles ?? [],
+          lastError: ceic.lastError ?? null,
+          summary: ceic.summary ?? "",
+        },
         limitations: [
           "Urban unemployment: source is NBS (data.stats.gov.cn), which blocks the host IP even from Hong Kong — shows blank and falls back.",
           "Sector fund flows: EastMoney upstream is intermittently flaky (occasional empty/502); retried but may show no data.",
-          "CEIC: current subscription denies the search API, so CEIC series are not directly fetchable (AKShare/FRED cover the gaps).",
+          ceicLimitation(ceic),
         ],
       };
 

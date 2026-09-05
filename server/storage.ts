@@ -8,6 +8,9 @@ import {
   chartConfigs,
   viewState,
   importedSeries,
+  ceicImportCatalog,
+  ceicImportObservations,
+  ceicImportFiles,
   scenarios,
   briefs,
   policyUpdates,
@@ -35,6 +38,11 @@ import type {
   InsertViewState,
   ImportedSeries,
   InsertImportedSeries,
+  CeicCatalogEntry,
+  InsertCeicCatalogEntry,
+  CeicObservation,
+  InsertCeicObservation,
+  CeicImportFile,
   Scenario,
   InsertScenario,
   Brief,
@@ -53,6 +61,8 @@ import type {
   InsertPrediction,
 } from "@shared/schema";
 import { eq, desc, gte, lte, and, sql } from "drizzle-orm";
+import { createRequire as nodeCreateRequire } from "node:module";
+import { join } from "node:path";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dual driver setup:
@@ -63,10 +73,20 @@ import { eq, desc, gte, lte, and, sql } from "drizzle-orm";
 
 type AnyDb = ReturnType<typeof makePgDb> | ReturnType<typeof makePgliteDb>;
 
+// The two driver factories below load their packages lazily via require() so a
+// PGlite-only run never pulls `pg` (and vice versa). That works in the shipped
+// esbuild CJS bundle, but bare `require` is undefined when the same file is run
+// as ESM (`tsx server/index.ts`, and any tsx test harness), which made local dev
+// crash on boot. Resolve a working require for BOTH module systems.
+const nodeRequire: NodeRequire =
+  typeof require === "function"
+    ? require
+    : nodeCreateRequire(join(process.cwd(), "noop.cjs"));
+
 function makePgDb(url: string) {
   // Lazy import so PGlite-only paths don't pull pg.
-  const { Pool } = require("pg") as typeof import("pg");
-  const { drizzle } = require("drizzle-orm/node-postgres") as typeof import("drizzle-orm/node-postgres");
+  const { Pool } = nodeRequire("pg") as typeof import("pg");
+  const { drizzle } = nodeRequire("drizzle-orm/node-postgres") as typeof import("drizzle-orm/node-postgres");
   const pool = new Pool({
     connectionString: url,
     // Railway internal Postgres uses TLS but with their cert chain.
@@ -78,8 +98,8 @@ function makePgDb(url: string) {
 }
 
 function makePgliteDb(dataDir: string) {
-  const { PGlite } = require("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
-  const { drizzle } = require("drizzle-orm/pglite") as typeof import("drizzle-orm/pglite");
+  const { PGlite } = nodeRequire("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
+  const { drizzle } = nodeRequire("drizzle-orm/pglite") as typeof import("drizzle-orm/pglite");
   const client = new PGlite(dataDir);
   return drizzle(client as any);
 }
@@ -179,6 +199,53 @@ export async function bootstrapSchema(): Promise<void> {
       PRIMARY KEY (series_id, date)
     )`,
     `CREATE INDEX IF NOT EXISTS imported_series_id_idx ON imported_series(series_id)`,
+    // ─── CEIC import bridge (Phase 7) ────────────────────────────────────
+    // Additive only: no existing table is altered or migrated.
+    `CREATE TABLE IF NOT EXISTS ceic_import_catalog (
+      series_id TEXT PRIMARY KEY,
+      mnemonic TEXT,
+      label TEXT NOT NULL,
+      label_zh TEXT,
+      geo TEXT,
+      frequency TEXT,
+      unit TEXT,
+      original_source TEXT,
+      logical_id TEXT,
+      transform TEXT,
+      first_date TEXT,
+      last_date TEXT,
+      last_imported_at TIMESTAMP,
+      last_file_vintage TEXT,
+      vintage_enabled BOOLEAN,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      source_mode TEXT NOT NULL DEFAULT 'cdm_import',
+      metadata_json JSONB
+    )`,
+    `CREATE INDEX IF NOT EXISTS ceic_catalog_logical_idx ON ceic_import_catalog(logical_id)`,
+    `CREATE TABLE IF NOT EXISTS ceic_import_observations (
+      series_id TEXT NOT NULL,
+      observation_date TEXT NOT NULL,
+      vintage_date TEXT NOT NULL,
+      value DOUBLE PRECISION,
+      imported_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      source_file_hash TEXT,
+      status TEXT NOT NULL DEFAULT 'ok',
+      source_mode TEXT NOT NULL DEFAULT 'cdm_import',
+      PRIMARY KEY (series_id, observation_date, vintage_date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS ceic_obs_series_idx ON ceic_import_observations(series_id)`,
+    `CREATE TABLE IF NOT EXISTS ceic_import_files (
+      file_hash TEXT PRIMARY KEY,
+      filename TEXT,
+      source_mode TEXT NOT NULL DEFAULT 'cdm_import',
+      vintage_date TEXT NOT NULL,
+      layout TEXT,
+      series_count INTEGER NOT NULL DEFAULT 0,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      imported_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      warnings_json JSONB
+    )`,
+    `CREATE INDEX IF NOT EXISTS ceic_files_imported_idx ON ceic_import_files(imported_at)`,
     `CREATE TABLE IF NOT EXISTS scenarios (
       id SERIAL PRIMARY KEY,
       generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -392,6 +459,43 @@ export interface IStorage {
   >;
   getImportedSeries(seriesId: string): Promise<ImportedSeries[]>;
   deleteImportedSeries(seriesId: string): Promise<number>;
+
+  // CEIC import bridge (Phase 7)
+  upsertCeicCatalogBatch(entries: Partial<InsertCeicCatalogEntry>[]): Promise<number>;
+  listCeicCatalog(): Promise<CeicCatalogEntry[]>;
+  getCeicCatalogEntry(seriesId: string): Promise<CeicCatalogEntry | undefined>;
+  getCeicCatalogByLogicalId(logicalId: string): Promise<CeicCatalogEntry | undefined>;
+  setCeicMapping(
+    seriesId: string,
+    logicalId: string | null,
+    transform: string | null,
+  ): Promise<CeicCatalogEntry | undefined>;
+  insertCeicObservations(rows: InsertCeicObservation[]): Promise<number>;
+  listCeicVintages(seriesId: string, observationDate?: string): Promise<CeicObservation[]>;
+  getLatestCeicObservations(seriesId: string): Promise<{ date: string; value: number | null; vintageDate: string }[]>;
+  getCeicImportFile(fileHash: string): Promise<CeicImportFile | undefined>;
+  recordCeicImportFile(row: {
+    fileHash: string;
+    filename?: string | null;
+    sourceMode: string;
+    vintageDate: string;
+    layout?: string | null;
+    seriesCount: number;
+    rowCount: number;
+    warnings?: string[];
+  }): Promise<void>;
+  listCeicImportFiles(limit?: number): Promise<CeicImportFile[]>;
+  getCeicImportStats(): Promise<{
+    catalogCount: number;
+    mappedCount: number;
+    observationCount: number;
+    vintageCount: number;
+    seriesWithVintages: number;
+    latestObservationDate: string | null;
+    latestImportAt: string | null;
+    latestVintageDate: string | null;
+    byMode: { sourceMode: string; series: number; rows: number }[];
+  }>;
 
   // Scenarios (Phase 3b)
   createScenario(input: InsertScenario): Promise<Scenario>;
@@ -781,6 +885,253 @@ export class DatabaseStorage implements IStorage {
       .where(eq(importedSeries.seriesId, seriesId))
       .orderBy(desc(importedSeries.date));
     return rows;
+  }
+
+  // ─── CEIC import bridge (Phase 7) ────────────────────────────────────
+
+  async upsertCeicCatalogBatch(entries: Partial<InsertCeicCatalogEntry>[]): Promise<number> {
+    if (!entries.length) return 0;
+    let n = 0;
+    for (const e of entries) {
+      if (!e.seriesId) continue;
+      await (db as any).execute(sql`
+        INSERT INTO ceic_import_catalog
+          (series_id, mnemonic, label, label_zh, geo, frequency, unit, original_source,
+           logical_id, transform, first_date, last_date, last_imported_at,
+           last_file_vintage, vintage_enabled, status, source_mode, metadata_json)
+        VALUES (
+          ${e.seriesId}, ${e.mnemonic ?? null}, ${e.label ?? e.seriesId}, ${e.labelZh ?? null},
+          ${e.geo ?? null}, ${e.frequency ?? null}, ${e.unit ?? null}, ${e.originalSource ?? null},
+          ${e.logicalId ?? null}, ${e.transform ?? null}, ${e.firstDate ?? null}, ${e.lastDate ?? null},
+          NOW(), ${e.lastFileVintage ?? null}, ${e.vintageEnabled ?? null},
+          ${e.status ?? "active"}, ${e.sourceMode ?? "cdm_import"},
+          ${JSON.stringify(e.metadataJson ?? {})}::jsonb
+        )
+        ON CONFLICT (series_id) DO UPDATE SET
+          mnemonic        = COALESCE(EXCLUDED.mnemonic, ceic_import_catalog.mnemonic),
+          label           = COALESCE(NULLIF(EXCLUDED.label, ''), ceic_import_catalog.label),
+          label_zh        = COALESCE(EXCLUDED.label_zh, ceic_import_catalog.label_zh),
+          geo             = COALESCE(EXCLUDED.geo, ceic_import_catalog.geo),
+          frequency       = COALESCE(EXCLUDED.frequency, ceic_import_catalog.frequency),
+          unit            = COALESCE(EXCLUDED.unit, ceic_import_catalog.unit),
+          original_source = COALESCE(EXCLUDED.original_source, ceic_import_catalog.original_source),
+          -- NEVER clobber a user-set mapping with a null coming from a file.
+          logical_id      = COALESCE(EXCLUDED.logical_id, ceic_import_catalog.logical_id),
+          transform       = COALESCE(EXCLUDED.transform, ceic_import_catalog.transform),
+          first_date      = LEAST(COALESCE(EXCLUDED.first_date, ceic_import_catalog.first_date),
+                                  COALESCE(ceic_import_catalog.first_date, EXCLUDED.first_date)),
+          last_date       = GREATEST(COALESCE(EXCLUDED.last_date, ceic_import_catalog.last_date),
+                                     COALESCE(ceic_import_catalog.last_date, EXCLUDED.last_date)),
+          last_imported_at   = NOW(),
+          last_file_vintage  = COALESCE(EXCLUDED.last_file_vintage, ceic_import_catalog.last_file_vintage),
+          vintage_enabled    = COALESCE(EXCLUDED.vintage_enabled, ceic_import_catalog.vintage_enabled),
+          status             = EXCLUDED.status,
+          source_mode        = EXCLUDED.source_mode,
+          metadata_json      = COALESCE(EXCLUDED.metadata_json, ceic_import_catalog.metadata_json)
+      `);
+      n += 1;
+    }
+    return n;
+  }
+
+  async listCeicCatalog(): Promise<CeicCatalogEntry[]> {
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportCatalog)
+      .orderBy(desc(ceicImportCatalog.lastImportedAt));
+    return rows;
+  }
+
+  async getCeicCatalogEntry(seriesId: string): Promise<CeicCatalogEntry | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportCatalog)
+      .where(eq(ceicImportCatalog.seriesId, seriesId));
+    return rows[0];
+  }
+
+  async getCeicCatalogByLogicalId(logicalId: string): Promise<CeicCatalogEntry | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportCatalog)
+      .where(eq(ceicImportCatalog.logicalId, logicalId))
+      .orderBy(desc(ceicImportCatalog.lastImportedAt));
+    return rows[0];
+  }
+
+  async setCeicMapping(
+    seriesId: string,
+    logicalId: string | null,
+    transform: string | null,
+  ): Promise<CeicCatalogEntry | undefined> {
+    await (db as any).execute(sql`
+      UPDATE ceic_import_catalog
+         SET logical_id = ${logicalId}, transform = ${transform}
+       WHERE series_id = ${seriesId}
+    `);
+    return this.getCeicCatalogEntry(seriesId);
+  }
+
+  /**
+   * Append revision-aware observations. Conflicts on
+   * (series_id, observation_date, vintage_date) refresh the value in place —
+   * a *new* vintage always produces a new row, so history is never lost.
+   */
+  async insertCeicObservations(rows: InsertCeicObservation[]): Promise<number> {
+    if (!rows.length) return 0;
+    let n = 0;
+    for (const r of rows) {
+      await (db as any).execute(sql`
+        INSERT INTO ceic_import_observations
+          (series_id, observation_date, vintage_date, value, imported_at,
+           source_file_hash, status, source_mode)
+        VALUES (
+          ${r.seriesId}, ${r.observationDate}, ${r.vintageDate},
+          ${r.value ?? null}, NOW(), ${r.sourceFileHash ?? null},
+          ${r.status ?? "ok"}, ${r.sourceMode ?? "cdm_import"}
+        )
+        ON CONFLICT (series_id, observation_date, vintage_date) DO UPDATE SET
+          value            = EXCLUDED.value,
+          imported_at      = NOW(),
+          source_file_hash = EXCLUDED.source_file_hash,
+          status           = EXCLUDED.status,
+          source_mode      = EXCLUDED.source_mode
+      `);
+      n += 1;
+    }
+    return n;
+  }
+
+  async listCeicVintages(seriesId: string, observationDate?: string): Promise<CeicObservation[]> {
+    const where = observationDate
+      ? and(
+          eq(ceicImportObservations.seriesId, seriesId),
+          eq(ceicImportObservations.observationDate, observationDate),
+        )
+      : eq(ceicImportObservations.seriesId, seriesId);
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportObservations)
+      .where(where)
+      .orderBy(desc(ceicImportObservations.observationDate), desc(ceicImportObservations.vintageDate));
+    return rows;
+  }
+
+  /** Latest vintage per observation date, newest observation first. */
+  async getLatestCeicObservations(
+    seriesId: string,
+  ): Promise<{ date: string; value: number | null; vintageDate: string }[]> {
+    const result: any = await (db as any).execute(sql`
+      SELECT DISTINCT ON (observation_date)
+             observation_date AS "date",
+             value            AS "value",
+             vintage_date     AS "vintageDate"
+        FROM ceic_import_observations
+       WHERE series_id = ${seriesId}
+       ORDER BY observation_date DESC, vintage_date DESC
+    `);
+    const rows = result.rows ?? result;
+    return rows.map((r: any) => ({
+      date: r.date,
+      value: r.value != null ? Number(r.value) : null,
+      vintageDate: r.vintageDate,
+    }));
+  }
+
+  async getCeicImportFile(fileHash: string): Promise<CeicImportFile | undefined> {
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportFiles)
+      .where(eq(ceicImportFiles.fileHash, fileHash));
+    return rows[0];
+  }
+
+  async recordCeicImportFile(row: {
+    fileHash: string;
+    filename?: string | null;
+    sourceMode: string;
+    vintageDate: string;
+    layout?: string | null;
+    seriesCount: number;
+    rowCount: number;
+    warnings?: string[];
+  }): Promise<void> {
+    await (db as any).execute(sql`
+      INSERT INTO ceic_import_files
+        (file_hash, filename, source_mode, vintage_date, layout, series_count, row_count, imported_at, warnings_json)
+      VALUES (
+        ${row.fileHash}, ${row.filename ?? null}, ${row.sourceMode}, ${row.vintageDate},
+        ${row.layout ?? null}, ${row.seriesCount}, ${row.rowCount}, NOW(),
+        ${JSON.stringify(row.warnings ?? [])}::jsonb
+      )
+      ON CONFLICT (file_hash) DO NOTHING
+    `);
+  }
+
+  async listCeicImportFiles(limit = 20): Promise<CeicImportFile[]> {
+    const rows = await (db as any)
+      .select()
+      .from(ceicImportFiles)
+      .orderBy(desc(ceicImportFiles.importedAt))
+      .limit(limit);
+    return rows;
+  }
+
+  async getCeicImportStats() {
+    const one = async (q: any) => {
+      const r: any = await (db as any).execute(q);
+      const rows = r.rows ?? r;
+      return rows[0] ?? {};
+    };
+    const many = async (q: any) => {
+      const r: any = await (db as any).execute(q);
+      return r.rows ?? r;
+    };
+
+    const cat = await one(sql`
+      SELECT COUNT(*)::int AS "catalogCount",
+             COUNT(logical_id)::int AS "mappedCount"
+        FROM ceic_import_catalog
+    `);
+    const obs = await one(sql`
+      SELECT COUNT(*)::int AS "vintageCount",
+             COUNT(DISTINCT (series_id || '|' || observation_date))::int AS "observationCount",
+             MAX(observation_date) AS "latestObservationDate",
+             MAX(vintage_date)     AS "latestVintageDate",
+             MAX(imported_at)      AS "latestImportAt"
+        FROM ceic_import_observations
+    `);
+    const multi = await one(sql`
+      SELECT COUNT(*)::int AS "seriesWithVintages" FROM (
+        SELECT series_id FROM ceic_import_observations
+         GROUP BY series_id HAVING COUNT(DISTINCT vintage_date) > 1
+      ) t
+    `);
+    const byMode = await many(sql`
+      SELECT source_mode AS "sourceMode",
+             COUNT(DISTINCT series_id)::int AS "series",
+             COUNT(*)::int AS "rows"
+        FROM ceic_import_observations
+       GROUP BY source_mode
+    `);
+
+    return {
+      catalogCount: Number(cat.catalogCount ?? 0),
+      mappedCount: Number(cat.mappedCount ?? 0),
+      observationCount: Number(obs.observationCount ?? 0),
+      vintageCount: Number(obs.vintageCount ?? 0),
+      seriesWithVintages: Number(multi.seriesWithVintages ?? 0),
+      latestObservationDate: obs.latestObservationDate ?? null,
+      latestVintageDate: obs.latestVintageDate ?? null,
+      latestImportAt: obs.latestImportAt
+        ? new Date(obs.latestImportAt).toISOString()
+        : null,
+      byMode: (byMode as any[]).map((m) => ({
+        sourceMode: m.sourceMode,
+        series: Number(m.series ?? 0),
+        rows: Number(m.rows ?? 0),
+      })),
+    };
   }
 
   // ─── Scenarios (Phase 3b) ────────────────────────────────────────────

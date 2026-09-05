@@ -1,8 +1,17 @@
 /**
- * Unified series fetch (Phase 2.5).
+ * Unified series fetch (Phase 2.5, extended Phase 7).
  *
- * Priority: CEIC (if seriesId mapped) → NBS → FRED → Yahoo → Stooq
- * Falls back to next source on empty or error.
+ * Priority: imported:<id> → CEIC import (CDM/bridge, if mapped AND fresh) →
+ *           AKShare macro → chinadata → CEIC REST (only when entitled) →
+ *           HKEX → OECD → AKShare → EastMoney → NBS → FRED → Yahoo → Stooq →
+ *           stale CEIC import (last resort, flagged)
+ *
+ * Falls back to the next source on empty or error. Two Phase 7 rules:
+ *   1. A mapped CEIC import wins over free fallbacks ONLY while it is fresh;
+ *      a stale import is held back and used only if everything else is empty,
+ *      and is then labelled with a data-quality note.
+ *   2. The CEIC REST client is skipped entirely unless the source mode is
+ *      `api`, so an unentitled key is not re-hit (403) on every page load.
  */
 
 import { REGISTRY, getEntry, type CeicConfig } from "./registry";
@@ -35,6 +44,8 @@ export interface TimePoint {
 export interface Provenance {
   source:
     | "ceic"
+    /** CEIC via CDMNext export upload or the local Python bridge (not the REST API). */
+    | "ceic_import"
     | "nbs"
     | "fred"
     | "oecd"
@@ -51,6 +62,16 @@ export interface Provenance {
   subscribed: boolean;
   cacheHit: boolean;
   error?: string;
+  /** CEIC only: which route the data arrived through. */
+  mode?: "api" | "python_bridge" | "cdm_import";
+  /** CEIC only: the upstream CEIC series ID / mnemonic behind this value. */
+  ceicSeriesId?: string;
+  /** CEIC import only: the vintage (file/run date) of the newest observation. */
+  vintageDate?: string;
+  /** True when the values are older than the freshness budget for the frequency. */
+  stale?: boolean;
+  /** Short human note surfaced in report evidence / deck footnotes. */
+  qualityNote?: string;
 }
 
 export interface SeriesResult {
@@ -77,6 +98,71 @@ function applyCeicTransform(points: TimePoint[], transform: CeicConfig["transfor
     });
   }
   return points;
+}
+
+// ─── CEIC import lookup (Phase 7) ──────────────────────────────────────
+// A short in-process cache keeps the extra catalog lookup off the hot path:
+// fetchSeries is called dozens of times per report/dashboard render, and the
+// mapping table changes only when the user edits a mapping or runs an import.
+
+let catalogCache: { at: number; byLogicalId: Map<string, any> } | null = null;
+const CATALOG_TTL_MS = 60_000;
+
+/** Invalidate the mapping cache (called after an import or a mapping edit). */
+export function invalidateCeicCatalogCache(): void {
+  catalogCache = null;
+  ceicApiFlag = null;
+}
+
+async function ceicCatalogFor(logicalId: string): Promise<any | null> {
+  try {
+    if (!catalogCache || Date.now() - catalogCache.at > CATALOG_TTL_MS) {
+      const { storage } = await import("../storage");
+      const rows = await storage.listCeicCatalog();
+      const byLogicalId = new Map<string, any>();
+      for (const r of rows) {
+        if (!r.logicalId) continue;
+        const prev = byLogicalId.get(r.logicalId);
+        // Most recently imported mapping wins if two CEIC series claim one ID.
+        if (!prev || (r.lastDate ?? "") > (prev.lastDate ?? "")) byLogicalId.set(r.logicalId, r);
+      }
+      catalogCache = { at: Date.now(), byLogicalId };
+    }
+    return catalogCache.byLogicalId.get(logicalId) ?? null;
+  } catch {
+    // A cold DB (tables not yet created) must never break the fallback chain.
+    return null;
+  }
+}
+
+/**
+ * Is the CEIC REST client allowed to run at all?
+ *
+ * Cached for 60s: fetchSeries is called dozens of times per render and this
+ * guard must not add a status query to every one of them.
+ */
+let ceicApiFlag: { at: number; value: boolean } | null = null;
+async function ceicApiEnabled(): Promise<boolean> {
+  if (ceicApiFlag && Date.now() - ceicApiFlag.at < CATALOG_TTL_MS) return ceicApiFlag.value;
+  let value = false;
+  try {
+    const { shouldUseCeicApi } = await import("../clients/ceicSource");
+    value = await shouldUseCeicApi();
+  } catch {
+    value = false;
+  }
+  ceicApiFlag = { at: Date.now(), value };
+  return value;
+}
+
+/** Freshness budget in days, by CEIC frequency label. */
+function staleBudgetDays(frequency: string | null | undefined): number {
+  const f = (frequency ?? "").toLowerCase();
+  if (f.startsWith("d")) return 10;
+  if (f.startsWith("w")) return 24;
+  if (f.startsWith("q")) return 190;
+  if (f.startsWith("a") || f.startsWith("y")) return 500;
+  return 75; // monthly + unknown
 }
 
 /**
@@ -139,9 +225,64 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
     }
   }
 
+  // ─── Mapped CEIC import (CDMNext export or Python bridge) ──────────────
+  // Runs BEFORE every free fallback because the user pays for CEIC and it is
+  // the most authoritative source — but only while the import is fresh. A
+  // stale import is parked in `staleCeic` and used only if all other sources
+  // come back empty, so a six-month-old CDM export can never mask live NBS or
+  // AKShare data.
+  let staleCeic: SeriesResult | null = null;
+  const catEntry = await ceicCatalogFor(logicalId);
+  if (catEntry) {
+    try {
+      const { storage } = await import("../storage");
+      const { applyCeicImportTransform } = await import("../clients/ceicSource");
+      const rows = await storage.getLatestCeicObservations(catEntry.seriesId);
+      const withValues = rows.filter((r: any) => r.value != null);
+      if (withValues.length > 0) {
+        // Storage returns newest-first; the rest of the app expects ascending.
+        const asc = [...rows].sort((a: any, b: any) => a.date.localeCompare(b.date));
+        const transformed = applyCeicImportTransform(
+          asc.map((r: any) => ({ date: r.date, value: r.value })),
+          catEntry.transform,
+        );
+        const lastDate = asc[asc.length - 1].date;
+        const vintageDate = withValues[0]?.vintageDate ?? catEntry.lastFileVintage ?? undefined;
+        const budget = staleBudgetDays(catEntry.frequency);
+        const ageDays = Math.floor((Date.now() - Date.parse(`${lastDate}T00:00:00Z`)) / 86_400_000);
+        const stale = Number.isFinite(ageDays) && ageDays > budget;
+        const mode: "python_bridge" | "cdm_import" =
+          catEntry.sourceMode === "python_bridge" ? "python_bridge" : "cdm_import";
+        const result: SeriesResult = {
+          data: transformed,
+          provenance: {
+            source: "ceic_import",
+            lastUpdated: catEntry.lastImportedAt
+              ? new Date(catEntry.lastImportedAt).toISOString()
+              : now,
+            subscribed: true,
+            cacheHit: false,
+            mode,
+            ceicSeriesId: String(catEntry.seriesId),
+            vintageDate,
+            stale,
+            qualityNote: stale
+              ? `CEIC ${mode === "python_bridge" ? "bridge" : "CDM import"} for ${logicalId} is stale: latest observation ${lastDate} (${ageDays}d old, budget ${budget}d). Refresh the CDMNext export or re-run the collector.`
+              : undefined,
+          },
+        };
+        if (!stale) return result;
+        staleCeic = result;
+      }
+    } catch (err: any) {
+      console.warn(`[fetchSeries] CEIC import lookup failed for ${logicalId}:`, err?.message ?? err);
+    }
+  }
+
   const entry = getEntry(logicalId);
 
   if (!entry) {
+    if (staleCeic) return staleCeic;
     return {
       data: [],
       provenance: {
@@ -154,8 +295,10 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
     };
   }
 
-  // "pending" fallback means we have no free source for this series yet
+  // "pending" fallback means we have no free source for this series yet.
+  // A stale CEIC import still beats nothing at all here.
   if (entry.fallback === "pending") {
+    if (staleCeic) return staleCeic;
     return {
       data: [],
       provenance: {
@@ -163,7 +306,9 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
         lastUpdated: now,
         subscribed: false,
         cacheHit: false,
-        error: "data_source_pending: requires CEIC subscription",
+        error:
+          "data_source_pending: no free source mapped. Map a CEIC series to this " +
+          "logical ID on the Imports \u2192 CEIC tab (CDMNext export or Python bridge).",
       },
     };
   }
@@ -217,8 +362,12 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
     }
   }
 
-  // ─── Try CEIC FIRST if a direct seriesId is mapped (Phase 2.5) ───────────
-  if (entry.ceic?.seriesId) {
+  // ─── Try the CEIC REST API — only when the key is actually entitled ───
+  // Phase 7: the production key returns an explicit 403 deny on /series/{id}/data.
+  // shouldUseCeicApi() is false whenever the effective source mode is
+  // cdm_import / python_bridge / unavailable, so we stop paying the latency and
+  // log noise of a call we already know will be refused.
+  if (entry.ceic?.seriesId && (await ceicApiEnabled())) {
     try {
       const result = await getCeicData(entry.ceic.seriesId, { count: 60, force: _opts?.force });
       // Success path: array of TimePoints
@@ -231,6 +380,8 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
             lastUpdated: now,
             subscribed: true,
             cacheHit: false,
+            mode: "api",
+            ceicSeriesId: String(entry.ceic.seriesId),
           },
         };
       }
@@ -531,6 +682,9 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
   }
 
   // ─── All sources exhausted ────────────────────────────────────────────────
+  // Last resort: a stale CEIC import beats an empty chart, but it is returned
+  // with stale=true and a qualityNote so report/deck can caveat it.
+  if (staleCeic) return staleCeic;
   return {
     data: [],
     provenance: {

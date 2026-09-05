@@ -7,8 +7,11 @@ export type ProvenanceType = "static" | "ceic" | "sonar" | "claude" | "deepseek"
 
 // ─── Phase 2 extended source type ─────────────────────────────────────────────
 export type ProvenanceSource =
-  | "ceic" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static"
-  | "akshare" | "oecd" | "hkex" | "eastmoney";
+  | "ceic" | "ceic_import" | "nbs" | "fred" | "stooq" | "yahoo" | "pending" | "static"
+  | "akshare" | "oecd" | "hkex" | "eastmoney" | "chinadata" | "imported";
+
+/** Phase 7: which route a CEIC figure travelled through. */
+export type CeicMode = "api" | "python_bridge" | "cdm_import";
 
 const LEGACY_STYLES: Record<ProvenanceType, { label: string; cls: string; icon: any }> = {
   static:   { label: "Static (May 2026)",  cls: "bg-muted text-muted-foreground",                                   icon: FileText  },
@@ -32,6 +35,18 @@ const SOURCE_STYLES: Record<ProvenanceSource, { label: string; cls: string; icon
   oecd:      { label: "OECD",           cls: "bg-sky-500/10 text-sky-700 dark:text-sky-300",                 icon: Globe         },
   hkex:      { label: "HKEX",           cls: "bg-rose-500/10 text-rose-700 dark:text-rose-300",              icon: Building2     },
   eastmoney: { label: "EastMoney",      cls: "bg-orange-500/10 text-orange-700 dark:text-orange-300",        icon: TrendingUp    },
+  chinadata: { label: "GACC customs",   cls: "bg-lime-500/10 text-lime-700 dark:text-lime-300",              icon: Globe         },
+  imported:  { label: "Imported",       cls: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300",        icon: FileText      },
+  // Phase 7: CEIC that arrived through a CDMNext export or the local Python
+  // bridge rather than the REST API. Deliberately a DIFFERENT chip from `ceic`
+  // so a reader can tell an entitled API pull from a user-uploaded snapshot.
+  ceic_import: { label: "CEIC (import)", cls: "bg-blue-500/10 text-blue-700 dark:text-blue-300",             icon: FileText      },
+};
+
+const CEIC_MODE_LABEL: Record<CeicMode, string> = {
+  api: "CEIC REST API",
+  python_bridge: "CEIC Python bridge (local collector)",
+  cdm_import: "CEIC CDMNext export upload",
 };
 
 // ─── Helper: humanize timestamp ───────────────────────────────────────────────
@@ -56,6 +71,12 @@ interface Phase2Props {
   subscribed?: boolean;
   cacheHit?: boolean;
   error?: string;
+  /** Phase 7 CEIC extras — all optional, chip degrades gracefully without them. */
+  mode?: CeicMode;
+  ceicSeriesId?: string;
+  vintageDate?: string;
+  stale?: boolean;
+  qualityNote?: string;
 }
 
 /** Returns true when provenance indicates NBS unavailability or unreachable/empty fallback. */
@@ -66,7 +87,18 @@ function isNbsFallback(source: ProvenanceSource, error?: string): boolean {
   return e.includes("nbs") || e.includes("unreachable") || e.includes("empty");
 }
 
-export function ProvenanceChipLive({ source, lastUpdated, subscribed: _subscribed, cacheHit: _cacheHit, error }: Phase2Props) {
+export function ProvenanceChipLive({
+  source,
+  lastUpdated,
+  subscribed: _subscribed,
+  cacheHit: _cacheHit,
+  error,
+  mode,
+  ceicSeriesId,
+  vintageDate,
+  stale,
+  qualityNote,
+}: Phase2Props) {
   const cfg = SOURCE_STYLES[source] ?? SOURCE_STYLES.pending;
   const Icon = cfg.icon;
   const humanTs = lastUpdated ? humanizeTs(lastUpdated) : null;
@@ -90,14 +122,19 @@ export function ProvenanceChipLive({ source, lastUpdated, subscribed: _subscribe
     );
   }
 
+  // A stale CEIC import is shown amber — the value is real but the snapshot is
+  // behind its expected release cadence.
+  const staleCls = stale ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : cfg.cls;
+  const label = stale ? `${cfg.label} · stale` : cfg.label;
+
   const inner = (
     <Badge
       variant="secondary"
-      className={`gap-1 font-normal ${cfg.cls}`}
+      className={`gap-1 font-normal ${staleCls}`}
       data-testid={`provenance-live-${source}`}
     >
       <Icon className="h-3 w-3" />
-      <span>{cfg.label}</span>
+      <span>{label}</span>
       {humanTs && (
         <span className="opacity-60 ml-1 flex items-center gap-0.5">
           <Clock className="h-2.5 w-2.5" />
@@ -108,7 +145,11 @@ export function ProvenanceChipLive({ source, lastUpdated, subscribed: _subscribe
   );
 
   const tooltipContent = [
+    mode ? CEIC_MODE_LABEL[mode] : null,
+    ceicSeriesId ? `CEIC series ${ceicSeriesId}` : null,
+    vintageDate ? `Vintage ${vintageDate}` : null,
     lastUpdated ? `Updated: ${new Date(lastUpdated).toLocaleString()}` : null,
+    qualityNote ?? null,
     error ? `Note: ${error}` : null,
   ]
     .filter(Boolean)

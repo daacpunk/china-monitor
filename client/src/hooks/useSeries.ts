@@ -59,10 +59,32 @@ export function useCalendar(days = 30) {
 
 // ─── CEIC health hook ─────────────────────────────────────────────────────────
 
+/**
+ * Phase 7: this endpoint no longer reports a fixed "no subscriptions" verdict.
+ * It returns the real CEIC source mode plus catalog/mapping/freshness counts,
+ * so the Settings card reflects whichever route CEIC data is arriving through
+ * (entitled REST key, CDMNext import, or the local Python bridge).
+ */
 export interface CeicHealthResponse {
   keyConfigured: boolean;
   lastTestStatus: string | null;
+  /** api | python_bridge | cdm_import | unavailable */
+  mode: "api" | "python_bridge" | "cdm_import" | "unavailable";
+  overrideMode: string;
+  /** True only when the key exists AND has not been observed to fail (403 deny). */
+  apiUsable: boolean;
+  bridgeTokenConfigured: boolean;
+  catalogCount: number;
+  mappedCount: number;
+  observationCount: number;
+  vintageCount: number;
+  staleCount: number;
+  freshCount: number;
+  latestObservationDate: string | null;
+  latestImportAt: string | null;
+  /** Series reachable through the import bridge — NOT REST subscriptions. */
   subscribedSeriesCount: number;
+  lastError: string | null;
   message: string;
 }
 

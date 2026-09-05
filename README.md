@@ -107,7 +107,9 @@ In the service **Variables** tab, add (leave blank for now if you don't have the
 
 | Variable | Purpose |
 |---|---|
-| `CEIC_API_KEY` | CEIC v2 API access |
+| `CEIC_API_KEY` | _(optional)_ CEIC v2 REST access. Only useful with a key that is **entitled for data** — the current production key returns an explicit 403 deny on `/series/{id}/data`, so the app skips REST entirely and sources CEIC via CDMNext import or the local Python bridge. Leave unset if you have no entitled key. |
+| `CEIC_IMPORT_TOKEN` | _(optional)_ Shared secret that enables `POST /api/imports/ceic-bridge`, the endpoint the local collector in `ceic-python-bridge/` uploads to. **Not** your CEIC password. Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` and set the identical value in `ceic-python-bridge/.env`. Unset ⇒ the endpoint answers `503 bridge_disabled`. |
+| `CHINA_MONITOR_URL` | _(local only, not a Railway variable)_ Set in `ceic-python-bridge/.env` to this service's public URL so `collector.py --post` knows where to upload. |
 | `SONAR_API_KEY` | Perplexity Sonar Pro |
 | `ANTHROPIC_API_KEY` | Claude synthesis |
 | `DEEPSEEK_API_KEY` | DeepSeek batch workloads |
@@ -181,7 +183,12 @@ Every paid API call passes through `checkCeiling(service)` before execution.
 
 Every data point on the dashboard carries a `<ProvenanceChip>` showing source:
 
-`static` · `ceic` · `nbs` · `fred` · `oecd` · `hkex` · `eastmoney` · `akshare` · `yahoo` · `stooq` · `sonar` · `claude` · `deepseek` · `imported` · `user`
+`static` · `ceic` · `ceic_import` · `nbs` · `fred` · `oecd` · `hkex` · `eastmoney` · `akshare` · `chinadata` · `yahoo` · `stooq` · `sonar` · `claude` · `deepseek` · `imported` · `user`
+
+`ceic` means the entitled REST API; `ceic_import` means a CDMNext export upload or the
+local Python bridge, and its tooltip names which of the two plus the CEIC series ID and
+vintage date. A CEIC import that has fallen behind its release cadence is chipped
+**stale** and steps aside for fresher free sources rather than overriding them.
 
 This is non-negotiable per the project brief: **no stale training data may surface without a `static` label.**
 
@@ -194,6 +201,12 @@ This is non-negotiable per the project brief: **no stale training data may surfa
   schema with idempotent bootstrap.
 - **Data**: live CEIC + FRED + OECD + HKEX + EastMoney + AKShare + Yahoo + Stooq + NBS
   cascade; FactSet/Bloomberg CSV imports; 24h series cache.
+- **CEIC import bridge (Phase 7)**: CDMNext Excel/CSV import (long/wide/two-column,
+  idempotent on a SHA-256 file hash), a revision-aware vintage store, catalog +
+  logical-ID mapping so imported CEIC series flow straight into the report and deck,
+  a token-protected upload endpoint for the local `ceic-python-bridge/` collector,
+  and a real source-mode indicator (`api` / `python_bridge` / `cdm_import` /
+  `unavailable`) across Settings, Diagnostics, and report provenance.
 - **Analysis (Phase 3b)**: Trends, Attribution, Scenarios, Brief.
 - **Phase 0 stabilization**: registered Chart.js TimeScale + date adapter and added a
   per-route error boundary (fixed the time-axis SPA crash).

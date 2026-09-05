@@ -67,6 +67,13 @@ export interface DocModel {
   // Relative & global context (Gap F): AH premium + China index returns +
   // USD/CNY + US-China 10Y differential + LLM stance, for the deck RELATIVE slide.
   relativeContext?: RelativeContext;
+  /**
+   * Phase 7: one line on how CEIC data reached this document — REST API vs
+   * CDMNext export vs local Python bridge — plus a stale-import caveat when
+   * applicable. Rendered on the Sources & Provenance slide. Undefined when
+   * CEIC is not contributing, so decks for non-CEIC users are unchanged.
+   */
+  ceicProvenance?: string;
 }
 
 function fnum(n: any, d = 1): string {
@@ -194,6 +201,30 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     /* transmission is best-effort; deck still renders without it */
   }
 
+  // CEIC provenance line (Phase 7) for the Sources & Provenance slide.
+  let ceicProvenance: string | undefined;
+  try {
+    const { getCeicStatus } = await import("../clients/ceicSource");
+    const s = await getCeicStatus();
+    if (s.mode !== "unavailable" && s.mappedCount > 0) {
+      const route =
+        s.mode === "api"
+          ? "CEIC REST API"
+          : s.mode === "python_bridge"
+            ? "CEIC Python bridge (local collector run against the user's CEIC login)"
+            : "CEIC CDMNext Excel/CSV export";
+      ceicProvenance =
+        `CEIC: ${s.mappedCount} series sourced via ${route}` +
+        (s.latestObservationDate ? `, latest observation ${s.latestObservationDate}` : "") +
+        (s.latestVintageDate ? `, vintage ${s.latestVintageDate}` : "") +
+        (s.staleSeries.length
+          ? `. ${s.staleSeries.length} mapped CEIC series were stale and deferred to free fallbacks (AKShare/FRED/NBS/OECD).`
+          : ".");
+    }
+  } catch {
+    /* provenance line is best-effort; deck still renders without it */
+  }
+
   // Relative & global context (Gap F) for the dedicated deck RELATIVE slide.
   let relativeContext: RelativeContext | undefined;
   try {
@@ -233,6 +264,7 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
     earningsContext,
     policyTransmission,
     relativeContext,
+    ceicProvenance,
   };
 }
 

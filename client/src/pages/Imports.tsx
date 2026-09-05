@@ -24,7 +24,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import ImportsCeic from "./ImportsCeic";
 import {
   Upload,
   FileText,
@@ -79,6 +81,14 @@ interface DryRunResult {
 // ──────────────────────────────────────────────────────────────────────────
 // Main page
 // ──────────────────────────────────────────────────────────────────────────
+/**
+ * Imports page.
+ *
+ * Two independent ingestion paths live behind the tabs:
+ *   • Workstation — FactSet / Bloomberg / manual CSV, unchanged from Phase 2.5.
+ *   • CEIC — Phase 7 CDMNext export + catalog/mapping/vintages + Python bridge.
+ * The FactSet path is untouched; the CEIC panel is additive.
+ */
 export default function Imports() {
   const { toast } = useToast();
   const [text, setText] = useState("");
@@ -189,7 +199,7 @@ export default function Imports() {
     <div className="mx-auto max-w-6xl px-6 py-6">
       <PageHeader
         title="Imports"
-        subtitle="Paste or upload FactSet workstation CSV exports — points are saved to the imported_series table and addressable as imported:<series_id>."
+        subtitle="Bring paid data in by file: FactSet/Bloomberg workstation exports, or CEIC CDMNext exports and the local Python bridge. Imported points win over free fallbacks while they are fresh."
         actions={
           <a
             href="__PORT_5000__/api/imports/template.csv"
@@ -202,6 +212,21 @@ export default function Imports() {
         }
       />
 
+      <Tabs defaultValue="workstation" className="mb-6">
+        <TabsList data-testid="tabs-imports">
+          <TabsTrigger value="workstation" data-testid="tab-workstation">
+            Workstation (FactSet / Bloomberg)
+          </TabsTrigger>
+          <TabsTrigger value="ceic" data-testid="tab-ceic">
+            CEIC (CDMNext / bridge)
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ceic" className="mt-6">
+          <ImportsCeic />
+        </TabsContent>
+
+        <TabsContent value="workstation" className="mt-6">
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         {/* ─── Input column ─── */}
         <Card className="p-5">
@@ -500,6 +525,8 @@ export default function Imports() {
           </div>
         )}
       </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

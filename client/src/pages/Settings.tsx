@@ -15,7 +15,7 @@ import { CheckCircle2, AlertCircle, ExternalLink, Database, RefreshCw, Trash2 } 
 import { useCeicHealth } from "@/hooks/useSeries";
 
 const SERVICES = [
-  { id: "ceic",     name: "CEIC",            docs: "https://developer.isimarkets.com/", hint: "Set in CDMNext > User > API. Header: `Authorization: Bearer …`" },
+  { id: "ceic",     name: "CEIC",            docs: "https://developer.isimarkets.com/", hint: "Optional. Only needed for an ENTITLED REST key; the current key returns 403 on data. CDMNext export + the local Python bridge need no key — see the CEIC access card below." },
   { id: "sonar",    name: "Perplexity (Agent API)", docs: "https://docs.perplexity.ai/docs/agent-api/quickstart",  hint: "Same Perplexity API key. Agent API is primary; Sonar Chat Completions is fallback until 2026-09-27. Get a key at perplexity.ai/account/api" },
   { id: "anthropic", name: "Anthropic Claude", docs: "https://docs.anthropic.com/",     hint: "Generate at console.anthropic.com/keys" },
   { id: "deepseek", name: "DeepSeek",        docs: "https://api-docs.deepseek.com/",    hint: "Generate at platform.deepseek.com/api_keys" },
@@ -146,6 +146,20 @@ function ApiKeysTab() {
   );
 }
 
+/** Phase 7: CEIC no longer has a single "subscription health" — it has a MODE. */
+const CEIC_MODE_TEXT: Record<string, string> = {
+  api: "REST API (entitled key)",
+  python_bridge: "Python bridge (local collector)",
+  cdm_import: "CDMNext import",
+  unavailable: "Not connected",
+};
+const CEIC_MODE_BADGE: Record<string, string> = {
+  api: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
+  python_bridge: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/40",
+  cdm_import: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/40",
+  unavailable: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/40",
+};
+
 function DataSourcesTab() {
   const { toast } = useToast();
   const { data: settings = [] } = useQuery<any[]>({ queryKey: ["/api/settings"] });
@@ -237,47 +251,132 @@ function DataSourcesTab() {
 
   return (
     <div className="space-y-4">
-      {/* CEIC subscription health card */}
+      {/* ─── CEIC access card (Phase 7) ────────────────────────────────────
+          Replaces the old "subscription health" card, which hardcoded a
+          "search API denied on tier" verdict. That was only ever true of the
+          REST path; CEIC now reaches this app through whichever of three
+          routes is actually configured, and this card reports the real one. */}
       <Card className="p-4" data-testid="ceic-health-card">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-blue-600" />
-            <h3 className="text-sm font-semibold">CEIC subscription health</h3>
+            <h3 className="text-sm font-semibold">CEIC access</h3>
           </div>
           {healthLoading ? (
             <Badge variant="outline" className="font-normal">Loading…</Badge>
-          ) : ceicHealth?.keyConfigured ? (
-            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 font-normal" variant="outline">
-              <CheckCircle2 className="h-3 w-3 mr-1" /> Key configured
-            </Badge>
           ) : (
-            <Badge variant="destructive" className="font-normal">
-              <AlertCircle className="h-3 w-3 mr-1" /> No key
+            <Badge
+              variant="outline"
+              className={`font-normal ${CEIC_MODE_BADGE[ceicHealth?.mode ?? "unavailable"]}`}
+              data-testid="badge-settings-ceic-mode"
+            >
+              {ceicHealth?.mode === "unavailable" ? (
+                <AlertCircle className="h-3 w-3 mr-1" />
+              ) : (
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+              )}
+              {CEIC_MODE_TEXT[ceicHealth?.mode ?? "unavailable"]}
             </Badge>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3 text-sm">
           <div>
-            <div className="text-xs text-muted-foreground">Subscribed series</div>
-            <div className="font-semibold">{ceicHealth?.subscribedSeriesCount ?? "—"}</div>
+            <div className="text-xs text-muted-foreground">Catalog series</div>
+            <div className="font-semibold">{ceicHealth?.catalogCount ?? "—"}</div>
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">Data source mode</div>
-            <Badge variant="outline" className="font-normal text-xs mt-0.5">Auto (CEIC primary, free fallback)</Badge>
+            <div className="text-xs text-muted-foreground">Mapped to logical IDs</div>
+            <div className="font-semibold">{ceicHealth?.mappedCount ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Vintage rows</div>
+            <div className="font-semibold">{ceicHealth?.vintageCount ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Stale mapped series</div>
+            <div className="font-semibold">{ceicHealth?.staleCount ?? "—"}</div>
           </div>
         </div>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground mb-3">
+          <span>Latest observation: {ceicHealth?.latestObservationDate ?? "—"}</span>
+          <span>Latest import/bridge run: {(ceicHealth?.latestImportAt ?? "").slice(0, 10) || "—"}</span>
+          <span>
+            API key:{" "}
+            {ceicHealth?.keyConfigured
+              ? ceicHealth.apiUsable
+                ? "configured and entitled"
+                : "configured but not entitled for data (403 deny) — REST calls are skipped"
+              : "none"}
+          </span>
+          <span>
+            Bridge endpoint:{" "}
+            {ceicHealth?.bridgeTokenConfigured ? "enabled (CEIC_IMPORT_TOKEN set)" : "disabled (CEIC_IMPORT_TOKEN unset)"}
+          </span>
+        </div>
+
         <p className="text-xs text-muted-foreground mb-3">{ceicHealth?.message ?? ""}</p>
+        {ceicHealth?.lastError && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-3">Last error: {ceicHealth.lastError}</p>
+        )}
+
+        {/* How to connect CEIC. No password field: CEIC website credentials
+            belong only in ceic-python-bridge/.env on the user's own machine. */}
+        <div className="rounded-md border border-dashed p-3 text-xs space-y-2">
+          <div className="font-medium">Connecting CEIC</div>
+          <div>
+            <span className="font-medium">1. CDMNext export (works today).</span> In CDMNext select your
+            series → Export → Excel or CSV (up to 3,000 series per export), then upload it under{" "}
+            <a href="/imports" className="underline" data-testid="link-settings-to-imports">
+              Imports → CEIC
+            </a>
+            . Long, wide, and two-column layouts are auto-detected; identical files are
+            idempotent; every load is kept as a dated vintage so revisions stay auditable.
+          </div>
+          <div>
+            <span className="font-medium">2. Local Python bridge (optional).</span> Install CEIC's client
+            with{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">
+              pip install --extra-index-url https://downloads.ceicdata.com/python ceic_api_client
+            </code>
+            , copy <code className="bg-muted px-1 py-0.5 rounded">ceic-python-bridge/.env.example</code> to{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">.env</code>, set{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">CEIC_LOGIN</code>/
+            <code className="bg-muted px-1 py-0.5 rounded">CEIC_PASSWORD</code>, then run{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">python3 probe.py</code> and{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">python3 collector.py --post</code>.
+          </div>
+          <div>
+            <span className="font-medium">3. Bridge token.</span> The collector uploads with{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">CEIC_IMPORT_TOKEN</code> — a random shared secret,
+            not your CEIC password. Set the same value on Railway and in the bridge's{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">.env</code>, plus{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">CHINA_MONITOR_URL</code> locally.
+          </div>
+          <div className="text-muted-foreground">
+            Your CEIC username and password are never entered here, never stored by this app, and
+            never sent to Railway — which is why there is no password field on this page.
+          </div>
+        </div>
+
         <Button
           size="sm"
           variant="outline"
+          className="mt-3"
           onClick={() => testCeicMut.mutate()}
-          disabled={testCeicMut.isPending || !ceicHealth?.keyConfigured}
+          disabled={testCeicMut.isPending || !ceicHealth?.apiUsable}
+          title={
+            ceicHealth?.apiUsable
+              ? "Run a live CEIC REST search"
+              : "REST test is disabled: this key has no data entitlement. Use the CDM import or Python bridge."
+          }
           data-testid="button-test-ceic-data"
         >
           {testCeicMut.isPending ? (
             <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Testing…</>
           ) : (
-            "Test CEIC data access"
+            "Test CEIC REST access"
           )}
         </Button>
       </Card>

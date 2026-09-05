@@ -27,6 +27,7 @@ import { registerReportRoutes } from "./report/routes";
 import { registerExportRoutes } from "./export/routes";
 import { registerAutomationRoutes } from "./automation/routes";
 import { registerDiagnosticsRoutes } from "./diagnostics/routes";
+import { registerCeicRoutes } from "./ceic/routes";
 
 /**
  * Mask an API key for display: show last 4 chars, mask the rest.
@@ -362,24 +363,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  /** GET /api/ceic/health — CEIC subscription status */
+  /**
+   * GET /api/ceic/health — CEIC access status.
+   *
+   * Phase 7: this no longer reports a hardcoded "no subscriptions" verdict.
+   * It reflects the real source mode (api | python_bridge | cdm_import |
+   * unavailable) plus catalog/mapping counts, so the Settings card tells the
+   * truth whichever route CEIC data is actually arriving through.
+   */
   app.get("/api/ceic/health", async (_req, res) => {
     try {
-      const key = await resolveApiKey("ceic");
-      const keyConfigured = !!key;
-
-      // Check last test result from DB
-      const keyRow = await storage.getApiKey("ceic");
-      const lastTestStatus = keyRow?.testStatus ?? null;
-
-      // Count subscribed series from search cache — quick heuristic
+      const { getCeicStatus } = await import("./clients/ceicSource");
+      const s = await getCeicStatus();
       res.json({
-        keyConfigured,
-        lastTestStatus,
-        subscribedSeriesCount: 0, // Phase 2: no subscriptions on current key
-        message: keyConfigured
-          ? "CEIC key configured. Current key has no data subscriptions — search/metadata available."
-          : "No CEIC key configured. Add key in Settings > API Keys.",
+        keyConfigured: s.apiKeyConfigured,
+        lastTestStatus: s.apiKeyTestStatus,
+        mode: s.mode,
+        overrideMode: s.overrideMode,
+        apiUsable: s.apiUsable,
+        bridgeTokenConfigured: s.bridgeTokenConfigured,
+        catalogCount: s.catalogCount,
+        mappedCount: s.mappedCount,
+        observationCount: s.observationCount,
+        vintageCount: s.vintageCount,
+        staleCount: s.staleSeries.length,
+        freshCount: s.freshSeriesCount,
+        latestObservationDate: s.latestObservationDate,
+        latestImportAt: s.latestImportAt,
+        // Kept for backwards compatibility with the existing Settings card:
+        // series reachable through the import bridge, not REST subscriptions.
+        subscribedSeriesCount: s.mappedCount,
+        lastError: s.lastError,
+        message: s.summary,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -1534,6 +1549,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerExportRoutes(app);
   registerAutomationRoutes(app);
   registerDiagnosticsRoutes(app);
+  registerCeicRoutes(app);
 
   return httpServer;
 }

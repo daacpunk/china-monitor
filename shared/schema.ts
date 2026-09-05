@@ -203,6 +203,114 @@ export type InsertImportedSeries = z.infer<typeof insertImportedSeriesSchema>;
 export type ImportedSeries = typeof importedSeries.$inferSelect;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CEIC import bridge (Phase 7)
+//
+// The production CEIC key has no REST data entitlement (explicit 403 deny), so
+// CEIC data reaches China Monitor by two *non-API* routes:
+//
+//   1. `cdm_import`    — CDMNext Excel/CSV export uploaded through the Imports
+//                        page (up to 3,000 series per export).
+//   2. `python_bridge` — a LOCAL python collector (ceic-python-bridge/) that
+//                        logs in with the user's CEIC website credentials and
+//                        POSTs normalised rows to /api/imports/ceic-bridge.
+//
+// Both routes land in the same three tables below, and both keep the legacy
+// `imported_series` current-value table in sync so existing fetchSeries
+// consumers (report context, PPTX deck, dashboards) keep working unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One row per CEIC series ever seen, plus its optional logical-ID mapping. */
+export const ceicImportCatalog = pgTable(
+  "ceic_import_catalog",
+  {
+    /** CEIC series ID or mnemonic — natural PK, always stored as text. */
+    seriesId: text("series_id").primaryKey(),
+    mnemonic: text("mnemonic"),
+    label: text("label").notNull(),
+    labelZh: text("label_zh"),
+    geo: text("geo"),
+    frequency: text("frequency"),
+    unit: text("unit"),
+    originalSource: text("original_source"),
+    /** China Monitor registry logical ID this series should feed (nullable). */
+    logicalId: text("logical_id"),
+    /** raw | yoy | divide_1000 | divide_100 | multiply_100 */
+    transform: text("transform"),
+    firstDate: text("first_date"),
+    lastDate: text("last_date"),
+    lastImportedAt: timestamp("last_imported_at"),
+    lastFileVintage: text("last_file_vintage"),
+    vintageEnabled: boolean("vintage_enabled"),
+    /** active | discontinued | unknown */
+    status: text("status").notNull().default("unknown"),
+    /** cdm_import | python_bridge | api */
+    sourceMode: text("source_mode").notNull().default("cdm_import"),
+    metadataJson: jsonb("metadata_json"),
+  },
+  (t) => ({
+    logicalIdx: index("ceic_catalog_logical_idx").on(t.logicalId),
+  }),
+);
+export const insertCeicCatalogSchema = createInsertSchema(ceicImportCatalog).omit({
+  lastImportedAt: true,
+});
+export type InsertCeicCatalogEntry = z.infer<typeof insertCeicCatalogSchema>;
+export type CeicCatalogEntry = typeof ceicImportCatalog.$inferSelect;
+
+/**
+ * Revision-aware observation store. Unlike `imported_series` (which is a
+ * last-write-wins current view), this table NEVER overwrites an earlier
+ * vintage — a restated CEIC print lands as a new (series, obs_date, vintage)
+ * row, so revisions stay auditable.
+ */
+export const ceicImportObservations = pgTable(
+  "ceic_import_observations",
+  {
+    seriesId: text("series_id").notNull(),
+    /** ISO YYYY-MM-DD period end of the observation. */
+    observationDate: text("observation_date").notNull(),
+    /** ISO YYYY-MM-DD vintage (file date / bridge run date). */
+    vintageDate: text("vintage_date").notNull(),
+    /** Nullable — CDM exports legitimately contain blank cells. */
+    value: doublePrecision("value"),
+    importedAt: timestamp("imported_at").notNull().defaultNow(),
+    sourceFileHash: text("source_file_hash"),
+    /** ok | revised | missing */
+    status: text("status").notNull().default("ok"),
+    /** cdm_import | python_bridge | api */
+    sourceMode: text("source_mode").notNull().default("cdm_import"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.seriesId, t.observationDate, t.vintageDate] }),
+    seriesIdx: index("ceic_obs_series_idx").on(t.seriesId),
+  }),
+);
+export const insertCeicObservationSchema = createInsertSchema(ceicImportObservations).omit({
+  importedAt: true,
+});
+export type InsertCeicObservation = z.infer<typeof insertCeicObservationSchema>;
+export type CeicObservation = typeof ceicImportObservations.$inferSelect;
+
+/** Idempotency ledger — a SHA-256 of the uploaded payload, one row per file. */
+export const ceicImportFiles = pgTable(
+  "ceic_import_files",
+  {
+    fileHash: text("file_hash").primaryKey(),
+    filename: text("filename"),
+    /** cdm_import | python_bridge | api */
+    sourceMode: text("source_mode").notNull().default("cdm_import"),
+    vintageDate: text("vintage_date").notNull(),
+    layout: text("layout"),
+    seriesCount: integer("series_count").notNull().default(0),
+    rowCount: integer("row_count").notNull().default(0),
+    importedAt: timestamp("imported_at").notNull().defaultNow(),
+    warningsJson: jsonb("warnings_json"),
+  },
+  (t) => ({ importedIdx: index("ceic_files_imported_idx").on(t.importedAt) }),
+);
+export type CeicImportFile = typeof ceicImportFiles.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Scenarios — Phase 3b. Single base + bull + bear, 1Q forward. Each scenario
 // gets one row per generation; the latest row for a target_quarter is canonical.
 // hitRateJson is populated when the target quarter resolves (post-hoc scoring).
