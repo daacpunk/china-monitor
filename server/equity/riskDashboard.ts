@@ -26,6 +26,7 @@ import { SECTOR_UNIVERSE, THEMES_BY_ID, type CoverageTheme } from "./universe";
 import { buildValuationContext, valuationContextLine, type NameValuationContext } from "./valuationContext";
 import { fetchSeries } from "../series/fetchSeries";
 import { getAkshareSectorFlows } from "../clients/akshare";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 
 export type RiskCategory =
   | "macro" | "structural" | "policy" | "valuation" | "flow" | "geopolitical";
@@ -259,7 +260,7 @@ async function genRisks(
   baseThesis: string,
   opts: BuildRiskOpts,
 ): Promise<{ risks: Risk[]; cost: number; note?: string }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const { system: rtSystem, user: rtUser, panel } = buildRedTeamPrompt({
     baseThesis,
     context: evidence.slice(0, 8000),
@@ -301,7 +302,7 @@ async function genScenariosBlock(
   baseThesis: string,
   opts: BuildRiskOpts,
 ): Promise<{ scenarios: Scenario[]; falsification: string[]; cost: number; note?: string }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const { system: rtSystem, user: rtUser, panel } = buildRedTeamPrompt({
     baseThesis,
     context: evidence.slice(0, 8000),
@@ -398,7 +399,7 @@ export async function buildRiskDashboard(
   opts: BuildRiskOpts = {},
 ): Promise<RiskDashboard> {
   const reqThemes = (themes && themes.length ? themes : SECTOR_UNIVERSE.map((t) => t.id)).filter((t) => THEMES_BY_ID[t]);
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
 
   let ev: AssembledEvidence;
   try {

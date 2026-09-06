@@ -18,6 +18,8 @@ import { generateStrategyNote } from "../report/strategyNote";
 import { proposeHouseView } from "../report/houseView";
 import { refreshReportSeries } from "./refresh";
 import { notify } from "./notify";
+import { DEFAULT_REPORT_MODEL, getDefaultReportModel } from "../analysis/modelCatalog";
+import { maybeRefreshModelCatalog } from "../analysis/modelCatalogRefresh";
 import {
   capturePredictionsForHouseView,
   capturePredictionForNote,
@@ -36,6 +38,12 @@ export interface AutomationConfig {
   emphasis: CoverageTheme[];
   featuredNames: string[];
   model: string;
+  /**
+   * true once the user explicitly picks a synthesis model in the Automation UI.
+   * While false, scheduled reports follow the shared report default from the
+   * model catalog — so a newly promoted Sonnet is picked up automatically.
+   */
+  modelPinned?: boolean;
   refreshPolicyFirst: boolean;
   autoUpdateHouseView: boolean;
   notify: { inApp: boolean; email?: string };
@@ -52,23 +60,34 @@ const DEFAULT_CONFIG: AutomationConfig = {
   mode: "data_driven",
   emphasis: [],
   featuredNames: [],
-  model: "claude-sonnet-4",
+  model: DEFAULT_REPORT_MODEL,
+  modelPinned: false,
   refreshPolicyFirst: true,
   autoUpdateHouseView: false, // propose-only by default
   notify: { inApp: true },
 };
 
 export async function getConfig(): Promise<AutomationConfig> {
+  let cfg: AutomationConfig = { ...DEFAULT_CONFIG };
   try {
     const row = await storage.getSetting(SETTINGS_KEY);
-    if (row?.valueJson) return { ...DEFAULT_CONFIG, ...(row.valueJson as any) };
-  } catch { /* fall through */ }
-  return { ...DEFAULT_CONFIG };
+    if (row?.valueJson) cfg = { ...DEFAULT_CONFIG, ...(row.valueJson as any) };
+  } catch { /* fall through to defaults */ }
+  // Unpinned configs track the shared report default (Sonnet 5 today, whatever
+  // the catalog promotes to tomorrow).
+  if (!cfg.modelPinned) {
+    try {
+      cfg.model = await getDefaultReportModel();
+    } catch { /* keep compiled default */ }
+  }
+  return cfg;
 }
 
 export async function saveConfig(patch: Partial<AutomationConfig>): Promise<AutomationConfig> {
   const current = await getConfig();
   const next: AutomationConfig = { ...current, ...patch };
+  // An explicit model choice pins the config; clearing it re-enables tracking.
+  if (patch.model !== undefined) next.modelPinned = true;
   // Recompute nextRunAt whenever schedule-affecting fields change or on enable.
   next.nextRunAt = computeNextRun(next, new Date()).toISOString();
   await storage.setSetting({ key: SETTINGS_KEY, valueJson: next as any });
@@ -288,9 +307,18 @@ export function startScheduler(): void {
     } catch (err) {
       console.error("[scheduler] track-record resolution error", err);
     }
+    // LLM model catalog: discover newly released models and (Sonnet only)
+    // promote the report default. Internally throttled to once per 24h.
+    try {
+      await maybeRefreshModelCatalog();
+    } catch (err) {
+      console.error("[scheduler] model catalog refresh error", err);
+    }
   };
   // first tick shortly after boot, then every 15 min
   setTimeout(tick, 30_000);
   timer = setInterval(tick, TICK_MS);
-  console.log("[scheduler] started (15-min tick + sidecar monitor + track-record resolution)");
+  console.log(
+    "[scheduler] started (15-min tick + sidecar monitor + track-record resolution + 24h model-catalog refresh)",
+  );
 }

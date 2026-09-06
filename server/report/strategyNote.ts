@@ -17,6 +17,7 @@ import { generateCommentary, type LlmModel } from "../analysis/llm";
 import { buildRedTeamPrompt } from "../analysis/personas";
 import { assembleContext, contextToPrompt, type ReportContext } from "./context";
 import { SECTOR_UNIVERSE, type CoverageTheme } from "../equity/universe";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 
 export type ComposerMode = "data_driven" | "thesis_driven";
 
@@ -131,7 +132,7 @@ async function genSection(
   opts: GenerateOpts,
   contextBlock: string,
 ): Promise<{ section: StrategyNoteSection; cost: number; tin: number; tout: number }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const featured = opts.featuredNames.join(", ") || "(none specified)";
   const emphasis = opts.emphasis.join(", ") || "all themes";
   const must = opts.mustInclude.length ? `Must address: ${opts.mustInclude.join("; ")}.` : "";
@@ -185,7 +186,7 @@ async function genPortfolio(
   opts: GenerateOpts,
   contextBlock: string,
 ): Promise<{ portfolio: PortfolioPick[]; cost: number; tin: number; tout: number }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const universe = SECTOR_UNIVERSE.flatMap((t) => t.names.map((n) => `${n.symbol} ${n.nameEn} (${t.id})`)).join(", ");
   const system =
     baseSystem("data_driven", model) +
@@ -229,7 +230,7 @@ async function genVerdict(
   opts: GenerateOpts,
   contextBlock: string,
 ): Promise<{ verdict: ThesisVerdict; cost: number; tin: number; tout: number }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const system =
     baseSystem("thesis_driven", model) +
     " Now render a structured verdict on the thesis. Be honest and critical. Output STRICT JSON only.";
@@ -280,7 +281,7 @@ async function genScenarios(
   opts: GenerateOpts,
   contextBlock: string,
 ): Promise<{ section: StrategyNoteSection; cost: number; tin: number; tout: number }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const emphasis = opts.emphasis.join(", ") || "all themes";
   const system =
     baseSystem(opts.mode, model) +
@@ -419,7 +420,7 @@ async function genRedTeam(
   contextBlock: string,
   opts: GenerateOpts,
 ): Promise<{ section: StrategyNoteSection; cost: number; tin: number; tout: number }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const { system, user } = buildRedTeamPrompt({
     baseThesis,
     context: contextBlock.slice(0, 12000),
@@ -442,7 +443,7 @@ async function genRedTeam(
 }
 
 export async function generateStrategyNote(opts: GenerateOpts): Promise<GeneratedNote> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const ctx = await assembleContext({
     mode: opts.mode,
     userThesis: opts.userThesis,

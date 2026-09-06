@@ -29,6 +29,7 @@ import {
   type NorthboundSummaryRow,
   type MarginPoint,
 } from "../clients/akshare";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 
 export type FlowRegime = "risk-on" | "risk-off" | "neutral" | "extreme";
 
@@ -341,7 +342,7 @@ async function interpret(
   evidence: string,
   opts: BuildFlowsOpts,
 ): Promise<{ regime: FlowRegime | null; confidence: number | null; narrative: string; drivers: string[]; positioningExtremes: string[]; cost: number; note?: string }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const system =
     "You are a flow & positioning strategist for an institutional China/HK equity desk. " +
     "Classify the current positioning REGIME from the live signals. The BACKBONE of the regime is the " +
@@ -390,7 +391,7 @@ export async function buildFlowsPositioning(opts: BuildFlowsOpts = {}): Promise<
     if (cached && Date.now() - cached.at < TTL) return cached.result;
   }
 
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
 
   let a: AssembledFlows;
   try {

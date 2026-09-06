@@ -18,6 +18,7 @@ import { fetchSeries, type TimePoint } from "../series/fetchSeries";
 import { generateCommentary, type LlmModel } from "./llm";
 import { detectTrend, type TrendResult } from "./trends";
 import { detectAnomaly, pctChange, cleanSeries } from "./stats";
+import { getDefaultReportModel } from "./modelCatalog";
 
 // Default drivers tracked in the scenario engine — chosen to span the
 // macro themes that move Chinese equities (reflation, growth, policy,
@@ -287,9 +288,10 @@ export async function generateScenario(opts?: {
   equities?: string[];
   targetQuarter?: string;
 }): Promise<GenerateScenarioResult> {
-  // Default: claude-sonnet-4 (~$0.03/call, higher quality reasoning over multi-driver synthesis).
+  // Default: the shared report default (Claude Sonnet 5 unless overridden in
+  // Settings) — higher-quality reasoning over multi-driver synthesis.
   // Frontend exposes a toggle so users can switch to claude-haiku-4 (~$0.005/call) for cheaper runs.
-  const model = opts?.model ?? "claude-sonnet-4";
+  const model = opts?.model ?? (await getDefaultReportModel());
   const inputs = await buildScenarioInputs({
     drivers: opts?.drivers,
     equities: opts?.equities,

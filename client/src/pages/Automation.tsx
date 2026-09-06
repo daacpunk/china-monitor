@@ -24,11 +24,11 @@ import {
   Clock, Play, RefreshCw, Loader2, CalendarClock, Bell, CheckCircle2,
   XCircle, AlertTriangle, Settings2,
 } from "lucide-react";
+import { useLlmCatalog } from "@/hooks/useLlmCatalog";
 
 type Mode = "data_driven" | "thesis_driven";
-type ModelId = "claude-sonnet-4" | "claude-haiku-4" | "deepseek-chat" | "deepseek-reasoner"
-  | "or-gpt-5.6" | "or-gpt-5.6-mini" | "or-gemini-2.5-pro" | "or-gemini-2.5-flash" | "or-grok-4.5"
-  | "or-glm-5.2" | "or-kimi-k3" | "or-qwen-3.8-max" | "or-minimax-m3" | "or-llama-4-maverick";
+// Catalog-driven (GET /api/llm/models) — no frozen list here.
+type ModelId = string;
 const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer"] as const;
 
 interface AutomationConfig {
@@ -149,6 +149,7 @@ export default function Automation() {
 
   const jobs = configQuery.data?.jobs ?? [];
   const update = (patch: Partial<AutomationConfig>) => setCfg({ ...cfg, ...patch });
+  const llmCatalog = useLlmCatalog();
 
   return (
     <div>
@@ -362,27 +363,23 @@ export default function Automation() {
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium uppercase text-muted-foreground">Synthesis model</label>
-            <select value={cfg.model} onChange={(e) => update({ model: e.target.value as ModelId })} className="rounded-md border bg-background px-2 py-1 text-sm" data-testid="select-model">
-              <optgroup label="Anthropic">
-                <option value="claude-sonnet-4">Claude Sonnet 4.6 (default)</option>
-                <option value="claude-haiku-4">Claude Haiku 4.5 (cheaper)</option>
-              </optgroup>
-              <optgroup label="DeepSeek">
-                <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-                <option value="deepseek-chat">DeepSeek Chat</option>
-              </optgroup>
-              <optgroup label="OpenRouter">
-                <option value="or-gpt-5.6">GPT-5.6 (Sol)</option>
-                <option value="or-gpt-5.6-mini">GPT-5.6 mini (Terra)</option>
-                <option value="or-gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="or-gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="or-grok-4.5">Grok 4.5</option>
-                <option value="or-glm-5.2">GLM 5.2</option>
-                <option value="or-kimi-k3">Kimi K3</option>
-                <option value="or-qwen-3.8-max">Qwen 3.8 Max</option>
-                <option value="or-minimax-m3">MiniMax M3</option>
-                <option value="or-llama-4-maverick">Llama 4 Maverick</option>
-              </optgroup>
+            <select
+              value={cfg.model}
+              onChange={(e) => update({ model: e.target.value })}
+              className="rounded-md border bg-background px-2 py-1 text-sm"
+              data-testid="select-model"
+            >
+              {llmCatalog.groups.map((g) => (
+                <optgroup key={g.provider} label={g.label}>
+                  {g.models.map((m) => (
+                    <option key={m.id} value={m.id}>{llmCatalog.optionLabel(m)}</option>
+                  ))}
+                </optgroup>
+              ))}
+              {/* keep an unknown persisted id visible instead of silently switching it */}
+              {cfg.model && !llmCatalog.models.some((m) => m.id === cfg.model) && (
+                <option value={cfg.model}>{cfg.model} (not in catalog)</option>
+              )}
             </select>
           </div>
           <Button

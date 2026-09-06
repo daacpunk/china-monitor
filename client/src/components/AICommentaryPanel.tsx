@@ -21,9 +21,10 @@ interface Props {
   contextIds?: string[];
 }
 
+// Commentary is a cheap path: Haiku stays the default here by design.
 const MODELS = [
   { value: "claude-haiku-4", label: "Claude Haiku 4.5", hint: "fast · $1/$5 per Mtok" },
-  { value: "claude-sonnet-4", label: "Claude Sonnet 4.6", hint: "best · $3/$15 per Mtok" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5", hint: "best · $2/$10 per Mtok" },
   { value: "deepseek-chat", label: "DeepSeek Chat", hint: "cheapest" },
   { value: "deepseek-reasoner", label: "DeepSeek Reasoner", hint: "reasoning" },
 ];

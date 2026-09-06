@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "test:ceic": "tsx scripts/test-ceic-import.ts",
     "test:ceic:integration": "tsx scripts/test-ceic-integration.ts",
-    "test:imports": "tsx scripts/test-factset-parser.ts && tsx scripts/test-ceic-import.ts && tsx scripts/test-ceic-integration.ts"
+    "test:imports": "tsx scripts/test-factset-parser.ts && tsx scripts/test-ceic-import.ts && tsx scripts/test-ceic-integration.ts",
+    "test:llm": "esbuild script/smoke_model_catalog.ts --bundle --platform=node --format=cjs --outfile=.smoke/catalog.cjs --log-level=error && node .smoke/catalog.cjs && esbuild script/smoke_openrouter.ts --bundle --platform=node --format=cjs --outfile=.smoke/openrouter.cjs --log-level=error && node .smoke/openrouter.cjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.4.6",

@@ -8,6 +8,7 @@
  */
 
 import { generateCommentary, type LlmModel } from "../analysis/llm";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 import { assembleContext, contextToPrompt } from "./context";
 import { SECTOR_UNIVERSE } from "../equity/universe";
 
@@ -22,7 +23,8 @@ export interface ProposedHouseView {
   changeSummary: string; // what changed vs the current view (for the change-log)
 }
 
-export async function proposeHouseView(model: LlmModel = "claude-sonnet-4"): Promise<ProposedHouseView> {
+export async function proposeHouseView(modelArg?: LlmModel): Promise<ProposedHouseView> {
+  const model: LlmModel = modelArg ?? (await getDefaultReportModel());
   const ctx = await assembleContext({
     mode: "data_driven",
     emphasis: [],

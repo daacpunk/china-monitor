@@ -16,14 +16,16 @@ for (const id of OPENROUTER_MODEL_IDS) {
   assert.ok(!MODEL_META[id].apiModel.includes("anthropic"));
   assert.ok(!MODEL_META[id].apiModel.includes("deepseek"));
 }
-assert.equal(LLM_MODEL_IDS.length, 14);
+assert.equal(LLM_MODEL_IDS.length, 16); // + claude-sonnet-5, claude-opus-5
 // direct providers untouched
-assert.equal(MODEL_META["claude-sonnet-4"].apiModel, "claude-sonnet-4-6");
+assert.equal(MODEL_META["claude-sonnet-4"].apiModel, "claude-sonnet-4-6"); // legacy id preserved
+assert.equal(MODEL_META["claude-sonnet-5"].apiModel, "claude-sonnet-5");   // new default
+assert.equal(MODEL_META["claude-opus-5"].apiModel, "claude-opus-5");
 assert.equal(MODEL_META["deepseek-chat"].provider, "deepseek");
 console.log("SMOKE OK — glm cost/MTok pair:", c);
 
 /*
  * Run (needs no live key):
- *   npx esbuild script/smoke_openrouter.ts --bundle --platform=node --format=cjs --outfile=/tmp/smoke.cjs \
- *     && DATABASE_URL="postgres://u:p@127.0.0.1:5999/none" node /tmp/smoke.cjs
+ *   npx esbuild script/smoke_openrouter.ts --bundle --platform=node --format=cjs --outfile=.smoke/openrouter.cjs \
+ *     && DATABASE_URL="postgres://u:p@127.0.0.1:5999/none" node .smoke/openrouter.cjs
  */

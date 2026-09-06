@@ -52,6 +52,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useLlmCatalog, CHEAP_MODEL } from "@/hooks/useLlmCatalog";
 
 // ─── Wire types ──────────────────────────────────────────────────────────────
 
@@ -630,9 +631,16 @@ export default function Scenarios() {
   const { toast } = useToast();
   const quarterOptions = useMemo(buildQuarterOptions, []);
   const [quarter, setQuarter] = useState<string>(nextQuarter());
-  const [model, setModel] = useState<"claude-sonnet-4" | "claude-haiku-4">(
-    "claude-sonnet-4",
-  );
+  // Catalog-driven: "best" is the shared report default (Sonnet 5 today), cheap stays Haiku.
+  const llmCatalog = useLlmCatalog();
+  const bestModel = llmCatalog.defaultModel;
+  const [model, setModel] = useState<string>("");
+  const [modelTouched, setModelTouched] = useState(false);
+  useEffect(() => {
+    if (!modelTouched && bestModel && model !== bestModel && model !== CHEAP_MODEL) setModel(bestModel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestModel, modelTouched]);
+  const modelName = (id: string) => llmCatalog.labelFor(id);
 
   // Fetch latest scenario for the selected quarter
   const latestQuery = useQuery<{ scenario: Scenario } | { error: string }>({
@@ -694,7 +702,7 @@ export default function Scenarios() {
   >({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/scenarios/generate", {
-        model,
+        model: model || undefined,
         targetQuarter: quarter,
       });
       return res.json();
@@ -702,7 +710,7 @@ export default function Scenarios() {
     onMutate: () => {
       toast({
         title: `Generating ${quarter} scenario…`,
-        description: `${model === "claude-sonnet-4" ? "Sonnet 4.6" : "Haiku 4.5"} · ~30s`,
+        description: `${modelName(model)} · ~30s`,
       });
     },
     onSuccess: (data) => {
@@ -776,27 +784,27 @@ export default function Scenarios() {
       <div className="flex items-center gap-1 rounded-md border border-border p-0.5 bg-card">
         <button
           type="button"
-          onClick={() => setModel("claude-sonnet-4")}
+          onClick={() => { setModelTouched(true); setModel(bestModel); }}
           className={`text-xs px-2 py-1 rounded transition-colors ${
-            model === "claude-sonnet-4"
+            model === bestModel
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           data-testid="button-model-sonnet"
         >
-          Sonnet 4.6
+          {modelName(bestModel)}
         </button>
         <button
           type="button"
-          onClick={() => setModel("claude-haiku-4")}
+          onClick={() => { setModelTouched(true); setModel(CHEAP_MODEL); }}
           className={`text-xs px-2 py-1 rounded transition-colors ${
-            model === "claude-haiku-4"
+            model === CHEAP_MODEL
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           data-testid="button-model-haiku"
         >
-          Haiku 4.5
+          {modelName(CHEAP_MODEL)}
         </button>
       </div>
 
@@ -865,7 +873,7 @@ export default function Scenarios() {
           <p className="text-sm text-muted-foreground mb-4">
             Click <span className="font-medium">Generate</span> to synthesise base /
             bull / bear cases from the latest macro snapshot using{" "}
-            {model === "claude-sonnet-4" ? "Sonnet 4.6" : "Haiku 4.5"}.
+            {modelName(model)}.
           </p>
           <Button
             onClick={() => generateMutation.mutate()}

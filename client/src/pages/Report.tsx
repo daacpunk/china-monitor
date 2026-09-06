@@ -28,11 +28,12 @@ import {
   FileText, Database, Target, Loader2, RefreshCw, Sparkles, Check,
   AlertTriangle, ExternalLink, Pencil, Save, X, Compass,
 } from "lucide-react";
+import { useLlmCatalog } from "@/hooks/useLlmCatalog";
 
 type Mode = "data_driven" | "thesis_driven";
-type ModelId = "claude-sonnet-4" | "claude-haiku-4" | "deepseek-chat" | "deepseek-reasoner"
-  | "or-gpt-5.6" | "or-gpt-5.6-mini" | "or-gemini-2.5-pro" | "or-gemini-2.5-flash" | "or-grok-4.5"
-  | "or-glm-5.2" | "or-kimi-k3" | "or-qwen-3.8-max" | "or-minimax-m3" | "or-llama-4-maverick";
+// Model ids are catalog-driven (GET /api/llm/models) so newly registered models
+// are selectable without a frontend redeploy.
+type ModelId = string;
 const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer"] as const;
 
 interface NoteSection { key: string; heading: string; body: string; }
@@ -209,7 +210,16 @@ export default function Report() {
   const [thesis, setThesis] = useState("");
   const [emphasis, setEmphasis] = useState<string[]>([]);
   const [featured, setFeatured] = useState<string[]>([]);
-  const [model, setModel] = useState<ModelId>("claude-sonnet-4");
+  const llmCatalog = useLlmCatalog();
+  // "" until the catalog resolves; an effect below adopts the server default.
+  const [model, setModel] = useState<ModelId>("");
+  const [modelTouched, setModelTouched] = useState(false);
+  useEffect(() => {
+    if (!modelTouched && llmCatalog.defaultModel && model !== llmCatalog.defaultModel) {
+      setModel(llmCatalog.defaultModel);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [llmCatalog.defaultModel, modelTouched]);
   const [activeNoteId, setActiveNoteId] = useState<number | null>(null);
 
   const universeQuery = useQuery<{ themes: UniverseTheme[] }, Error>({
@@ -239,7 +249,9 @@ export default function Report() {
 
   const startMutation = useMutation<{ jobId: number }, Error, void>({
     mutationFn: async () => {
-      const body = { mode, userThesis: mode === "thesis_driven" ? thesis : undefined, emphasis, featuredNames: featured, model };
+      // model may still be "" if the catalog has not loaded — omit it so the
+      // server applies its own default rather than failing validation.
+      const body = { mode, userThesis: mode === "thesis_driven" ? thesis : undefined, emphasis, featuredNames: featured, model: model || undefined };
       return (await apiRequest("POST", "/api/report/generate", body)).json();
     },
     onSuccess: (data) => { setGenError(null); genStartRef.current = Date.now(); setJobId(data.jobId); },
@@ -344,27 +356,19 @@ export default function Report() {
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium uppercase text-muted-foreground">Synthesis model</label>
-            <select value={model} onChange={(e) => setModel(e.target.value as ModelId)} className="rounded-md border bg-background px-2 py-1 text-sm">
-              <optgroup label="Anthropic">
-                <option value="claude-sonnet-4">Claude Sonnet 4.6 (default)</option>
-                <option value="claude-haiku-4">Claude Haiku 4.5 (cheaper)</option>
-              </optgroup>
-              <optgroup label="DeepSeek">
-                <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-                <option value="deepseek-chat">DeepSeek Chat</option>
-              </optgroup>
-              <optgroup label="OpenRouter">
-                <option value="or-gpt-5.6">GPT-5.6 (Sol)</option>
-                <option value="or-gpt-5.6-mini">GPT-5.6 mini (Terra)</option>
-                <option value="or-gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="or-gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="or-grok-4.5">Grok 4.5</option>
-                <option value="or-glm-5.2">GLM 5.2</option>
-                <option value="or-kimi-k3">Kimi K3</option>
-                <option value="or-qwen-3.8-max">Qwen 3.8 Max</option>
-                <option value="or-minimax-m3">MiniMax M3</option>
-                <option value="or-llama-4-maverick">Llama 4 Maverick</option>
-              </optgroup>
+            <select
+              value={model}
+              onChange={(e) => { setModelTouched(true); setModel(e.target.value); }}
+              className="rounded-md border bg-background px-2 py-1 text-sm"
+              data-testid="select-report-model"
+            >
+              {llmCatalog.groups.map((g) => (
+                <optgroup key={g.provider} label={g.label}>
+                  {g.models.map((m) => (
+                    <option key={m.id} value={m.id}>{llmCatalog.optionLabel(m)}</option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </div>
           <Button className="ml-auto gap-2 self-end" onClick={() => startMutation.mutate()} disabled={!canGenerate || generating} data-testid="button-generate-report">

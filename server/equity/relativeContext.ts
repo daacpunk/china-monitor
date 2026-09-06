@@ -33,6 +33,7 @@ import {
   type AkshareOhlcvPoint,
 } from "../clients/akshare";
 import { fetchSeries } from "../series/fetchSeries";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 
 export type Stance = "constructive" | "neutral" | "cautious";
 
@@ -346,7 +347,7 @@ async function interpret(
   evidence: string,
   opts: BuildRelativeContextOpts,
 ): Promise<{ stance: Stance | null; whyChina: string; drivers: string[]; cost: number; note?: string }> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const system =
     "You are a top-down strategist for an institutional China/HK equity desk. " +
     "From the relative & global context EVIDENCE BASE, take a STANCE on China equities " +
@@ -390,7 +391,7 @@ export async function buildRelativeContext(opts: BuildRelativeContextOpts = {}):
     if (cached && Date.now() - cached.at < TTL) return cached.result;
   }
 
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
 
   let a: AssembledRelative;
   try {

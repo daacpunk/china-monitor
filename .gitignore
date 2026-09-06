@@ -33,3 +33,4 @@ ceic-python-bridge/out/
 ceic-python-bridge/manifest.json
 ceic-python-bridge/.venv/
 ceic-python-bridge/__pycache__/
+.smoke/

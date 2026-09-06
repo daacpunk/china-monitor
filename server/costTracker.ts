@@ -1,4 +1,5 @@
 import { storage } from "./storage";
+import { getModelPricing } from "./analysis/modelCatalog";
 
 export const SERVICES = ["ceic", "sonar", "anthropic", "deepseek", "openrouter"] as const;
 export type Service = (typeof SERVICES)[number];
@@ -82,7 +83,9 @@ export async function recordCall(args: RecordCallArgs): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 export const PRICING = {
   // Anthropic Claude (per million tokens)
+  "claude-sonnet-5": { inputPerMTok: 2.0, outputPerMTok: 10.0 },
   "claude-sonnet-4": { inputPerMTok: 3.0, outputPerMTok: 15.0 },
+  "claude-opus-5": { inputPerMTok: 5.0, outputPerMTok: 25.0 },
   "claude-opus-4": { inputPerMTok: 15.0, outputPerMTok: 75.0 },
   "claude-haiku-4": { inputPerMTok: 0.8, outputPerMTok: 4.0 },
   // Perplexity Agent API preset "low" (ex-sonar-pro). Prefer billed usage.cost.total_cost
@@ -108,12 +111,20 @@ export const PRICING = {
   "ceic-default": { perRequest: 0.01 },
 };
 
+/**
+ * Cost for a model call. Resolution order:
+ *   1. the live LLM catalog (seed + models registered at runtime) — so newly
+ *      discovered models are billed correctly without a redeploy;
+ *   2. the frozen PRICING table above (seed LLM ids + non-LLM services such as
+ *      sonar / ceic, which carry perRequest components).
+ */
 export function estimateCost(
-  modelKey: keyof typeof PRICING,
+  modelKey: keyof typeof PRICING | (string & {}),
   tokensIn: number,
   tokensOut: number,
 ): number {
-  const p: any = PRICING[modelKey];
+  const catalogPrice = getModelPricing(String(modelKey));
+  const p: any = catalogPrice ?? (PRICING as any)[modelKey as string];
   if (!p) return 0;
   let cost = 0;
   if (p.perRequest) cost += p.perRequest;

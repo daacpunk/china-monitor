@@ -40,6 +40,7 @@ import {
   type PairAttribution,
   type SectorMappingEntry,
 } from "./attribution";
+import { getDefaultReportModel } from "./modelCatalog";
 
 // ─── Default universe ────────────────────────────────────────────────────
 
@@ -529,7 +530,7 @@ export async function generateBrief(opts?: {
 }): Promise<GenerateBriefResult> {
   // Default Sonnet — brief is a longer synthesis than scenarios and benefits from
   // higher-fidelity reasoning. UI exposes a Haiku toggle for cheaper runs.
-  const model = opts?.model ?? "claude-sonnet-4";
+  const model = opts?.model ?? (await getDefaultReportModel());
   const inputs = await buildBriefInputs({
     drivers: opts?.drivers,
     crossAsset: opts?.crossAsset,

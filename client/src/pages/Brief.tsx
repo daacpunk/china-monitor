@@ -47,6 +47,7 @@ import {
   Check,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useLlmCatalog, CHEAP_MODEL } from "@/hooks/useLlmCatalog";
 
 // ─── Wire types (mirror server/analysis/brief.ts) ────────────────────────────
 
@@ -235,6 +236,8 @@ function fmtCost(usd: number): string {
 }
 
 function modelLabel(m: string): string {
+  // Fallbacks only — the live labels come from the model catalog (useLlmCatalog).
+  if (m === "claude-sonnet-5") return "Sonnet 5";
   if (m === "claude-sonnet-4") return "Sonnet 4.6";
   if (m === "claude-haiku-4") return "Haiku 4.5";
   return m;
@@ -426,11 +429,21 @@ function HistoryRow({
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-type Model = "claude-sonnet-4" | "claude-haiku-4";
+// Catalog-driven: the "best" slot is the shared report default (Sonnet 5 today),
+// the cheap slot stays Haiku.
+type Model = string;
 
 export default function Brief() {
   const { toast } = useToast();
-  const [model, setModel] = useState<Model>("claude-sonnet-4");
+  const llmCatalog = useLlmCatalog();
+  const bestModel = llmCatalog.defaultModel;
+  const [model, setModel] = useState<Model>("");
+  const [modelTouched, setModelTouched] = useState(false);
+  useEffect(() => {
+    if (!modelTouched && bestModel && model !== bestModel && model !== CHEAP_MODEL) setModel(bestModel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestModel, modelTouched]);
+  const label = (id: string) => llmCatalog.labelFor(id) || modelLabel(id);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // Latest brief — used when no explicit selection.
@@ -479,7 +492,7 @@ export default function Brief() {
   // Generate brief mutation.
   const generateMutation = useMutation<GenerateResponse, Error>({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/brief/generate", { model });
+      const res = await apiRequest("POST", "/api/brief/generate", { model: model || undefined });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error ?? `HTTP ${res.status}`);
@@ -516,27 +529,27 @@ export default function Brief() {
       <div className="flex items-center gap-1 rounded-md border border-border p-0.5 bg-card">
         <button
           type="button"
-          onClick={() => setModel("claude-sonnet-4")}
+          onClick={() => { setModelTouched(true); setModel(bestModel); }}
           className={`text-xs px-2 py-1 rounded transition-colors ${
-            model === "claude-sonnet-4"
+            model === bestModel
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           data-testid="button-model-sonnet"
         >
-          Sonnet 4.6
+          {label(bestModel)}
         </button>
         <button
           type="button"
-          onClick={() => setModel("claude-haiku-4")}
+          onClick={() => { setModelTouched(true); setModel(CHEAP_MODEL); }}
           className={`text-xs px-2 py-1 rounded transition-colors ${
-            model === "claude-haiku-4"
+            model === CHEAP_MODEL
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           data-testid="button-model-haiku"
         >
-          Haiku 4.5
+          {label(CHEAP_MODEL)}
         </button>
       </div>
 
@@ -630,8 +643,8 @@ export default function Brief() {
             )}
           </Button>
           <div className="text-[11px] text-muted-foreground mt-4">
-            Using {modelLabel(model)} · ~30-45s · costs ~
-            {model === "claude-sonnet-4" ? "$0.05" : "$0.015"}
+            Using {label(model)} · ~30-45s · costs ~
+            {model === CHEAP_MODEL ? "$0.015" : "$0.05"}
           </div>
         </Card>
       )}

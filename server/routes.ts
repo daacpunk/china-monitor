@@ -15,7 +15,8 @@ import { listRegistry } from "./series/registry";
 import { searchSeries } from "./clients/ceic";
 import { getUpcomingReleases, getAllReleases } from "./clients/calendar";
 import { resolveApiKey } from "./keyResolver";
-import { LLM_MODEL_IDS } from "./analysis/modelIds";
+import { llmModelSchema, getDefaultReportModel, DEFAULT_CHEAP_MODEL, primeModelCatalog } from "./analysis/modelCatalog";
+import { registerLlmCatalogRoutes } from "./analysis/modelRoutes";
 import { POLICY_CHANNELS, COVERAGE_THEMES, TECH_CHANNEL_IDS } from "./policy/channels";
 import { scanChannels, EQUITY_TARGETS } from "./policy/service";
 import { PERSONAS, PERSONAS_BY_ID, DEFAULT_REDTEAM_PANEL } from "@shared/personas";
@@ -39,6 +40,11 @@ function maskKey(key: string): string {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  // Warm the LLM catalog snapshot (report default + dynamically registered
+  // models) so sync validation and MODEL_META resolution are correct from the
+  // first request. Non-fatal: falls back to the compiled seed catalog.
+  await primeModelCatalog();
+
   // ───────────────────────────────────────────────────────────────────────────
   // Health
   // ───────────────────────────────────────────────────────────────────────────
@@ -782,14 +788,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const Body = z.object({
         logicalId: z.string().min(1),
-        model: z
-          .enum(LLM_MODEL_IDS)
-          .optional(),
+        model: llmModelSchema.optional(),
         question: z.string().max(500).optional(),
         contextIds: z.array(z.string()).max(4).optional(),
       });
       const body = Body.parse(req.body);
-      const model = body.model ?? "claude-sonnet-4";
+      const model = body.model ?? (await getDefaultReportModel());
 
       const { fetchSeries } = await import("./series/fetchSeries");
       const { detectAnomaly, pctChange, cleanSeries } = await import("./analysis/stats");
@@ -1093,7 +1097,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/scenarios/generate", async (req, res) => {
     try {
       const Body = z.object({
-        model: z.enum(LLM_MODEL_IDS).optional(),
+        model: llmModelSchema.optional(),
         drivers: z.array(z.string()).optional(),
         equities: z.array(z.string()).optional(),
         targetQuarter: z.string().regex(/^\d{4}-Q[1-4]$/).optional(),
@@ -1224,7 +1228,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/brief/generate", async (req, res) => {
     try {
       const Body = z.object({
-        model: z.enum(LLM_MODEL_IDS).optional(),
+        model: llmModelSchema.optional(),
         drivers: z.array(z.string()).optional(),
         crossAsset: z.array(z.string()).optional(),
         equities: z.array(z.string()).optional(),
@@ -1390,7 +1394,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         channels: z.array(z.string()).optional(),
         sinceDays: z.number().int().min(1).max(120).optional(),
         lens: z.enum(["tech", "macro", "all"]).optional(),
-        classifyModel: z.enum(LLM_MODEL_IDS).optional(),
+        classifyModel: llmModelSchema.optional(),
       });
       const { channels, sinceDays, lens, classifyModel } = Body.parse(req.body ?? {});
       let ids = channels;
@@ -1399,7 +1403,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         else if (lens === "macro") ids = POLICY_CHANNELS.filter((c) => c.tier <= 4).map((c) => c.id);
         else ids = POLICY_CHANNELS.map((c) => c.id);
       }
-      const reports = await scanChannels(ids, sinceDays ?? 30, classifyModel ?? "claude-haiku-4");
+      const reports = await scanChannels(ids, sinceDays ?? 30, classifyModel ?? DEFAULT_CHEAP_MODEL);
       res.json({ reports });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -1422,14 +1426,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         personaId: z.string(),
         context: z.string().min(1).max(40000),
         focusHint: z.string().max(400).optional(),
-        model: z.enum(LLM_MODEL_IDS).optional(),
+        model: llmModelSchema.optional(),
       });
       const { personaId, context, focusHint, model } = Body.parse(req.body);
       if (!PERSONAS_BY_ID[personaId]) return res.status(404).json({ error: "Unknown persona" });
       const { generateCommentary } = await import("./analysis/llm");
       const { system, user, persona } = buildLensPrompt({ personaId, context, focusHint });
       const result = await generateCommentary({
-        model: model ?? "claude-sonnet-4",
+        model: model ?? (await getDefaultReportModel()),
         systemPrompt: system,
         userPrompt: user,
         actionContext: `persona_lens:${personaId}`,
@@ -1454,13 +1458,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         context: z.string().max(40000).optional(),
         panel: z.array(z.string()).optional(),
         focusHint: z.string().max(400).optional(),
-        model: z.enum(LLM_MODEL_IDS).optional(),
+        model: llmModelSchema.optional(),
       });
       const { baseThesis, context, panel, focusHint, model } = Body.parse(req.body);
       const { generateCommentary } = await import("./analysis/llm");
       const { system, user, panel: usedPanel } = buildRedTeamPrompt({ baseThesis, context, panel, focusHint });
       const result = await generateCommentary({
-        model: model ?? "claude-sonnet-4",
+        model: model ?? (await getDefaultReportModel()),
         systemPrompt: system,
         userPrompt: user,
         actionContext: "persona_redteam",
@@ -1545,6 +1549,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  registerLlmCatalogRoutes(app);
   registerReportRoutes(app);
   registerExportRoutes(app);
   registerAutomationRoutes(app);

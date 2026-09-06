@@ -11,8 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/lib/theme";
-import { CheckCircle2, AlertCircle, ExternalLink, Database, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, ExternalLink, Database, RefreshCw, Trash2, Sparkles, ArrowUpRight } from "lucide-react";
 import { useCeicHealth } from "@/hooks/useSeries";
+import { useLlmCatalog } from "@/hooks/useLlmCatalog";
 
 const SERVICES = [
   { id: "ceic",     name: "CEIC",            docs: "https://developer.isimarkets.com/", hint: "Optional. Only needed for an ENTITLED REST key; the current key returns 403 on data. CDMNext export + the local Python bridge need no key — see the CEIC access card below." },
@@ -22,6 +23,162 @@ const SERVICES = [
   { id: "openrouter", name: "OpenRouter",   docs: "https://openrouter.ai/docs",         hint: "One key for GPT, Gemini, Grok, GLM, Kimi, Qwen, MiniMax, Llama. Get it at openrouter.ai/keys." },
   { id: "fred",     name: "FRED (St. Louis Fed)", docs: "https://fred.stlouisfed.org/docs/api/api_key.html", hint: "Free key — register at fred.stlouisfed.org. Required for China CPI/PPI/PMI/IP when NBS is unreachable from overseas (Railway/EU/US hosting)." },
 ];
+
+/**
+ * Models card — LLM catalog state. Shows the current report default, the last
+ * catalog refresh, any auto-promotion, and models that were detected but not
+ * enabled (OpenRouter family hits, Claude Fable). No password fields here.
+ */
+function ModelsCard() {
+  const { toast } = useToast();
+  const catalog = useLlmCatalog();
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/llm/catalog/refresh")).json(),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/llm/models"] });
+      const added = (data?.registeredNew ?? []).length;
+      toast({
+        title: data?.ok ? "Catalog refreshed" : "Catalog refreshed with warnings",
+        description: [
+          added ? `${added} new model(s) registered` : "no new models",
+          data?.promotion ? `default → ${data.promotion.to}` : null,
+          data?.skipped?.length ? `skipped: ${data.skipped.join(", ")}` : null,
+          data?.lastError ? data.lastError : null,
+        ].filter(Boolean).join(" · "),
+        variant: data?.ok ? undefined : "destructive",
+      });
+    },
+    onError: (e: any) => toast({ title: "Refresh failed", description: e.message, variant: "destructive" }),
+  });
+
+  const defaultMutation = useMutation({
+    mutationFn: async (model: string) => (await apiRequest("POST", "/api/llm/default", { model })).json(),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/llm/models"] });
+      toast({ title: "Report default updated", description: data?.defaultModel });
+    },
+    onError: (e: any) => toast({ title: "Could not set default", description: e.message, variant: "destructive" }),
+  });
+
+  const models = catalog.models;
+  const current = models.find((m) => m.id === catalog.defaultModel);
+  const registered = models.filter((m) => m.source === "registered");
+  const promotion = catalog.data?.lastPromotion ?? null;
+  const detected = catalog.data?.detected ?? [];
+  const lastRefresh = catalog.data?.lastRefresh ?? null;
+  const lastError = catalog.data?.lastError ?? null;
+
+  return (
+    <Card className="p-4" data-testid="models-card">
+      <div className="mb-3 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Models</h3>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Report synthesis default + live catalog. New Anthropic Sonnet/Opus/Haiku releases are
+            auto-registered; the report default is auto-promoted within the Sonnet family only.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-2"
+          onClick={() => refreshMutation.mutate()}
+          disabled={refreshMutation.isPending}
+          data-testid="button-refresh-catalog"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+          Refresh catalog
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label className="text-xs uppercase text-muted-foreground">Report default</Label>
+          <select
+            className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            value={catalog.defaultModel}
+            onChange={(e) => defaultMutation.mutate(e.target.value)}
+            disabled={defaultMutation.isPending || catalog.isLoading}
+            data-testid="select-default-model"
+          >
+            {catalog.groups.map((g) => (
+              <optgroup key={g.provider} label={g.label}>
+                {g.models.map((m) => (
+                  <option key={m.id} value={m.id}>{catalog.optionLabel(m)}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {current && (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              API id <code className="rounded bg-muted px-1">{current.apiModel}</code> · $
+              {current.inputPerMTok}/${current.outputPerMTok} per MTok
+            </div>
+          )}
+        </div>
+        <div className="text-xs">
+          <Label className="text-xs uppercase text-muted-foreground">Catalog status</Label>
+          <div className="mt-1 space-y-0.5 text-muted-foreground">
+            <div>
+              Last refresh:{" "}
+              {lastRefresh ? new Date(lastRefresh).toLocaleString() : "never (runs daily, or refresh now)"}
+            </div>
+            <div>Registered beyond seed: {registered.length ? registered.map((m) => m.id).join(", ") : "none"}</div>
+            <div>Selectable models: {models.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {promotion && (
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-xs text-emerald-700 dark:text-emerald-300">
+          <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>
+            Report default auto-promoted {catalog.labelFor(promotion.from)} → {catalog.labelFor(promotion.to)} on{" "}
+            {new Date(promotion.at).toLocaleString()}.
+          </div>
+        </div>
+      )}
+
+      {lastError && (
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>Last refresh reported: {lastError}</div>
+        </div>
+      )}
+
+      {detected.length > 0 && (
+        <div className="mt-3">
+          <Label className="text-xs uppercase text-muted-foreground">Detected · not enabled</Label>
+          <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+            {detected.map((d) => (
+              <div key={`${d.provider}:${d.id}`} className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs">
+                <div className="min-w-0">
+                  <code className="truncate">{d.id}</code>
+                  <div className="text-[10px] text-muted-foreground">{d.provider} · {d.reason}</div>
+                </div>
+                {models.some((m) => m.id === d.id) && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => defaultMutation.mutate(d.id)}
+                    disabled={defaultMutation.isPending}
+                  >
+                    Set as default
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function ApiKeysTab() {
   const { toast } = useToast();
@@ -66,6 +223,7 @@ function ApiKeysTab() {
 
   return (
     <div className="space-y-4">
+      <ModelsCard />
       <p className="text-sm text-muted-foreground">
         Keys are stored in the Postgres database. On Railway you can override with{" "}
         <code className="text-xs bg-muted px-1 py-0.5 rounded">CEIC_API_KEY</code>,{" "}

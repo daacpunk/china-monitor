@@ -8,14 +8,15 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { generateStrategyNote, regenerateSection, type GenerateOpts } from "./strategyNote";
 import { proposeHouseView } from "./houseView";
-import { LLM_MODEL_IDS } from "../analysis/modelIds";
+import { llmModelSchema } from "../analysis/modelCatalog";
 import {
   capturePredictionsForHouseView,
   capturePredictionForNote,
   resolveDuePredictions,
 } from "../analysis/trackRecord";
 
-const MODEL_ENUM = z.enum(LLM_MODEL_IDS);
+/** Runtime known-model check (accepts dynamically registered models). */
+const MODEL_ENUM = llmModelSchema;
 
 export function registerReportRoutes(app: Express): void {
   // ── House view ──────────────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ export function registerReportRoutes(app: Express): void {
   app.post("/api/house-view/propose", async (req, res) => {
     try {
       const { model } = z.object({ model: MODEL_ENUM.optional() }).parse(req.body ?? {});
-      const proposal = await proposeHouseView(model ?? "claude-sonnet-4");
+      const proposal = await proposeHouseView(model);
       res.json({ proposal });
     } catch (err: any) {
       res.status(400).json({ error: err.message });

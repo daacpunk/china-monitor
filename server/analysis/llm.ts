@@ -15,29 +15,46 @@ import { resolveApiKey } from "../keyResolver";
 import { checkCeiling, recordCall, estimateCost, type Service } from "../costTracker";
 import { storage } from "../storage";
 import type { LlmModelId } from "./modelIds";
+import {
+  getModelMeta,
+  isKnownLlmModel,
+  listAllModels,
+  serviceForProvider,
+} from "./modelCatalog";
 
 export type LlmModel = LlmModelId;
 
-export const MODEL_META: Record<
-  LlmModel,
-  { service: Service; provider: "anthropic" | "deepseek" | "openrouter"; apiModel: string }
-> = {
-  "claude-sonnet-4":    { service: "anthropic", provider: "anthropic", apiModel: "claude-sonnet-4-6" },
-  "claude-haiku-4":     { service: "anthropic", provider: "anthropic", apiModel: "claude-haiku-4-5" },
-  "deepseek-chat":      { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-chat" },
-  "deepseek-reasoner":  { service: "deepseek",  provider: "deepseek",  apiModel: "deepseek-reasoner" },
-  // ─── OpenRouter (one key, models we have no direct key for) ───────
-  "or-gpt-5.6":         { service: "openrouter", provider: "openrouter", apiModel: "openai/gpt-5.6-sol" },
-  "or-gpt-5.6-mini":    { service: "openrouter", provider: "openrouter", apiModel: "openai/gpt-5.6-terra" },
-  "or-gemini-2.5-pro":  { service: "openrouter", provider: "openrouter", apiModel: "google/gemini-2.5-pro" },
-  "or-gemini-2.5-flash":{ service: "openrouter", provider: "openrouter", apiModel: "google/gemini-2.5-flash" },
-  "or-grok-4.5":        { service: "openrouter", provider: "openrouter", apiModel: "x-ai/grok-4.5" },
-  "or-glm-5.2":         { service: "openrouter", provider: "openrouter", apiModel: "z-ai/glm-5.2" },
-  "or-kimi-k3":         { service: "openrouter", provider: "openrouter", apiModel: "moonshotai/kimi-k3" },
-  "or-qwen-3.8-max":    { service: "openrouter", provider: "openrouter", apiModel: "qwen/qwen3.8-max" },
-  "or-minimax-m3":      { service: "openrouter", provider: "openrouter", apiModel: "minimax/minimax-m3" },
-  "or-llama-4-maverick":{ service: "openrouter", provider: "openrouter", apiModel: "meta-llama/llama-4-maverick" },
-};
+export interface LlmModelRouting {
+  service: Service;
+  provider: "anthropic" | "deepseek" | "openrouter";
+  apiModel: string;
+}
+
+/** Resolve routing for a model id (seed catalog + dynamic registry). */
+export function resolveModelRouting(id: string): LlmModelRouting | undefined {
+  const meta = getModelMeta(id);
+  if (!meta) return undefined;
+  return {
+    service: serviceForProvider(meta.provider) as Service,
+    provider: meta.provider,
+    apiModel: meta.apiModel,
+  };
+}
+
+/**
+ * MODEL_META is a live view over the catalog (seed + models registered at
+ * runtime by modelCatalogRefresh), so a newly released Sonnet routes correctly
+ * without a redeploy. Indexing an unknown id yields `undefined`.
+ */
+export const MODEL_META: Record<string, LlmModelRouting> = new Proxy(
+  {} as Record<string, LlmModelRouting>,
+  {
+    get: (_t, prop) => (typeof prop === "string" ? resolveModelRouting(prop) : undefined),
+    has: (_t, prop) => typeof prop === "string" && isKnownLlmModel(prop),
+    ownKeys: () => listAllModels().map((m) => m.id),
+    getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+  },
+);
 
 export interface CommentaryRequest {
   model: LlmModel;
@@ -198,8 +215,12 @@ async function callOpenRouter(
 // ─── Public entry ─────────────────────────────────────────────────────
 
 export async function generateCommentary(req: CommentaryRequest): Promise<CommentaryResult> {
-  const meta = MODEL_META[req.model];
-  if (!meta) throw new Error(`Unknown model: ${req.model}`);
+  const meta = resolveModelRouting(req.model);
+  if (!meta) {
+    throw new Error(
+      `Unknown model: ${req.model}. Known ids: ${listAllModels().map((m) => m.id).join(", ")}`,
+    );
+  }
 
   const maxOut = req.maxOutputTokens ?? 800;
   const cacheKey = `llm:${promptHash(req.model, req.systemPrompt, req.userPrompt)}`;

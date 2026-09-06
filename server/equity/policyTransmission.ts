@@ -29,6 +29,7 @@ import { fetchSeries } from "../series/fetchSeries";
 import { CHANNELS_BY_ID } from "../policy/channels";
 import { storage } from "../storage";
 import type { PolicyUpdate } from "@shared/schema";
+import { getDefaultReportModel } from "../analysis/modelCatalog";
 
 // Themes that have a featured single-name universe we can rank beneficiaries in.
 type UniverseTheme = CoverageTheme;
@@ -328,7 +329,7 @@ async function synthesize(
 export async function buildPolicyTransmission(
   opts: BuildTransmissionOpts = {},
 ): Promise<PolicyTransmission> {
-  const model = opts.model ?? "claude-sonnet-4";
+  const model = opts.model ?? (await getDefaultReportModel());
   const maxChains = Math.max(1, Math.min(8, opts.maxChains ?? 5));
 
   const cached = cache.get(CACHE_KEY);
