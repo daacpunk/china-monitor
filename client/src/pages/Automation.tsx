@@ -138,6 +138,10 @@ export default function Automation() {
     onError: (e: Error) => toast({ title: "Refresh failed", description: e.message, variant: "destructive" }),
   });
 
+  // Must be called unconditionally — before any early return. A post-return hook
+  // is React error #310 (Rendered more hooks than during the previous render).
+  const llmCatalog = useLlmCatalog();
+
   if (configQuery.isLoading || cfg === null) {
     return (
       <div>
@@ -149,7 +153,6 @@ export default function Automation() {
 
   const jobs = configQuery.data?.jobs ?? [];
   const update = (patch: Partial<AutomationConfig>) => setCfg({ ...cfg, ...patch });
-  const llmCatalog = useLlmCatalog();
 
   return (
     <div>
