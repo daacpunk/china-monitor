@@ -157,7 +157,7 @@ def main() -> int:
 
     login = os.environ.get("CEIC_LOGIN")
     password = os.environ.get("CEIC_PASSWORD")
-    application = os.environ.get("CEIC_APPLICATION") or None
+    application = os.environ.get("CEIC_APPLICATION") or "CEIC_Python"
 
     # ── 1. Package import ────────────────────────────────────────────────────
     try:
@@ -171,9 +171,9 @@ def main() -> int:
         report["verdict"] = "sdk_not_installed"
         report["nextSteps"] = [
             "Install the vendor-provided client from CEIC's private index:",
-            "  pip install --extra-index-url https://downloads.ceicdata.com/python ceic_api_client",
-            "It is NOT on public PyPI. If the index 403s, ask CEIC support to enable Python "
-            "access for your CDMNext login, then re-run this probe.",
+            "If you have the tarball: pip install /path/to/ceic_api_client-2.11.5.8.tar.gz",
+            "Else: pip install --extra-index-url https://downloads.ceicdata.com/python ceic_api_client",
+            "It is NOT on public PyPI and must not be committed to china-monitor.",
             "Until then use the CDMNext Excel/CSV path: Imports \u2192 CEIC tab in China Monitor.",
         ]
         print(json.dumps(report, indent=2))
@@ -203,7 +203,15 @@ def main() -> int:
     try:
         import importlib
 
-        api_mod = importlib.import_module("ceic_api_client.api")
+        api_mod = None
+        for mod_name in ("ceic_api_client.apis", "ceic_api_client.api"):
+            try:
+                api_mod = importlib.import_module(mod_name)
+                break
+            except Exception:
+                continue
+        if api_mod is None:
+            raise ImportError("ceic_api_client.apis / ceic_api_client.api not found")
         sessions_api_cls = getattr(api_mod, "SessionsApi", None)
         series_api_cls = getattr(api_mod, "SeriesApi", None)
         report["generated_client"] = {

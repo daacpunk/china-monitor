@@ -34,18 +34,30 @@ that flow into the dashboards, strategy report, and PPTX deck through
 
 ## Install
 
-CEIC's Python client is **not on public PyPI**. It is served from CEIC's own
-package index:
+CEIC's Python client is **not on public PyPI** (package `ceic-api-client==2.11.5.8`,
+proprietary license). Do **not** commit the tarball into `china-monitor`.
+
+If you already downloaded the SDK folder/tarball from CEIC:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install /path/to/ceic_api_client-2.11.5.8.tar.gz
+```
+
+Otherwise install from CEIC's private index:
+
+```bash
 pip install --extra-index-url https://downloads.ceicdata.com/python ceic_api_client
 ```
 
-If that index refuses your account, CEIC has not enabled Python access for your
-subscription. Ask CEIC support to enable it, and use the CDM import path
-meanwhile.
+Verified against `ceic_api_client` 2.11.5.8: the public entry point is
+`from ceic_api_client.pyceic import Ceic` then `Ceic.login(username, password)`.
+The facade sends `application="CEIC_Python"` itself. You do not need CEIC to
+issue a custom application ID. Session is stored in `~/.ceic_python_sdk/session.json`
+(or `%LOCALAPPDATA%\.ceic_python_sdk\session.json` on Windows). API host is
+`https://api.ceicdata.com/v2` (US/global). If your CDMNext account is on the
+China cluster, set region before login: `Ceic.set_region("CN")`.
 
 ## Configure
 

@@ -113,7 +113,15 @@ class CeicClient:
         try:
             import importlib
 
-            api_mod = importlib.import_module("ceic_api_client.api")
+            api_mod = None
+            for _mod in ("ceic_api_client.apis", "ceic_api_client.api"):
+                try:
+                    api_mod = importlib.import_module(_mod)
+                    break
+                except Exception:
+                    continue
+            if api_mod is None:
+                raise ImportError("ceic_api_client.apis not found")
             cls = getattr(api_mod, "SeriesApi", None)
             if cls is not None:
                 self.series_api = cls()
@@ -140,7 +148,15 @@ class CeicClient:
         try:
             import importlib
 
-            api_mod = importlib.import_module("ceic_api_client.api")
+            api_mod = None
+            for _mod in ("ceic_api_client.apis", "ceic_api_client.api"):
+                try:
+                    api_mod = importlib.import_module(_mod)
+                    break
+                except Exception:
+                    continue
+            if api_mod is None:
+                raise ImportError("ceic_api_client.apis not found")
             sessions_cls = getattr(api_mod, "SessionsApi", None)
             if sessions_cls is not None:
                 api = sessions_cls()
@@ -323,7 +339,7 @@ def main() -> int:
 
     login = os.environ.get("CEIC_LOGIN")
     password = os.environ.get("CEIC_PASSWORD")
-    application = os.environ.get("CEIC_APPLICATION") or None
+    application = os.environ.get("CEIC_APPLICATION") or "CEIC_Python"
     if not login or not password:
         die("CEIC_LOGIN and CEIC_PASSWORD must be set in the environment (see .env.example).", 3)
 
