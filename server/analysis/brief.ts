@@ -51,6 +51,11 @@ export const DEFAULT_BRIEF_DRIVERS = [
   "iva_yoy",
   "retail_sales_yoy",
   "m2_yoy",
+  "m1_yoy",
+  "tsf_new_rmb_loans",
+  "dr007",
+  "industrial_profits_ytd_yoy",
+  "property_sales_value_ytd",
   "usdcny_monthly",
   // Full trade picture (customs, USD): exports + imports + the balance.
   "exports_yoy",
