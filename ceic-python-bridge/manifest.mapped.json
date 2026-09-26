@@ -1,0 +1,459 @@
+{
+  "_readme": [
+    "Real CEIC series IDs already imported into China Monitor from CDM exports.",
+    "Copy to manifest.json on your Mac. Do not put passwords in this file.",
+    "Official NBS PMI is used. The short S&P headline PMI series are intentionally omitted."
+  ],
+  "series": [
+    {
+      "seriesId": "69851501",
+      "label": "CN: Purchasing Managers' Index: Mfg",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "pmi_mfg",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "400512307",
+      "label": "CN: Purchasing Managers' Index: Composite Output",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "230798301",
+      "label": "CN: PMI: Non Mfg: Business Activity",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "pmi_services",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7012201",
+      "label": "CN: Official Reserve Asset: Foreign Reserve(FR)",
+      "unit": "USD bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "fx_reserves_usd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "412800527",
+      "label": "CN: Govt Revenue: General Public Budget Revenue: YoY: ytd",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "Ministry of Finance",
+      "logicalId": "fiscal_revenue_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7983801",
+      "label": "CN: FDI: Utilized: ytd (annual data included all finance)",
+      "unit": "USD mn",
+      "frequency": "Quarterly",
+      "geo": "China",
+      "source": "Ministry of Commerce",
+      "logicalId": "fdi_quarterly",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "562907347",
+      "label": "CN: Property Price Index: New Constructed: Commodity Residential: Average",
+      "unit": "2010=100",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "CEIC Data",
+      "logicalId": "new_home_prices_70city",
+      "transform": "yoy"
+    },
+    {
+      "seriesId": "3640701",
+      "label": "CN: Value Added of Industry: YoY(Real)",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "iva_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "152794401",
+      "label": "CN: Reverse Repurchase Rate: Central Bank: 7 Day",
+      "unit": "% pa",
+      "frequency": "Daily",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "policy_rate_7d",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "131327501",
+      "label": "CN: Shanghai Interbank Offered Rate (SHIBOR): 3 Month",
+      "unit": "% pa",
+      "frequency": "Daily",
+      "geo": "China",
+      "source": "National Interbank Funding Center",
+      "logicalId": "shibor_3m",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7876001",
+      "label": "CN: FAI: YoY: ytd: Tertiary Industry: Real Estate",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "fai_real_estate_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7875101",
+      "label": "CN: FAI: YoY: ytd: SI: Manufacturing",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "fai_manufacturing_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7872901",
+      "label": "CN: Fixed Asset Investment: ytd",
+      "unit": "RMB mn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "fai_total_ytd",
+      "transform": "yoy"
+    },
+    {
+      "seriesId": "519770547",
+      "label": "CN: GDP: Constant Price",
+      "unit": "RMB bn",
+      "frequency": "Quarterly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "gdp_yoy",
+      "transform": "yoy"
+    },
+    {
+      "seriesId": "478334927",
+      "label": "CN: Floor Space Started: YoY: ytd: CB",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "property_starts_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "460362777",
+      "label": "CN: FAI: YoY: ytd: High-tech Industry: Manufacturing",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "fai_hitech_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "3964401",
+      "label": "CN: Floor Space Completed: ytd: Commodity Bldg (CB)",
+      "unit": "sq m th",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "completed_area_ytd",
+      "transform": "yoy"
+    },
+    {
+      "seriesId": "389439827",
+      "label": "CN: Surveyed Unemployment Rate: Urban",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "unemployment_rate",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "360444147",
+      "label": "CN: FAI: YoY: ytd: Tertiary Industry: ow: Infrastructure",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "fai_infra_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "329003901",
+      "label": "CN: Consumer Price Index: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "cpi_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "8052801",
+      "label": "CN: Industrial Enterprise: YoY: Total Profit: ytd",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "industrial_profits_ytd_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "8048501",
+      "label": "CN: Industrial Enterprise: Total Profit: ytd",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7061001",
+      "label": "CN: Interbank Bond Collateral Repo Rate: Weighted Avg: (R007) 7 Day",
+      "unit": "% pa",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Interbank Funding Center",
+      "logicalId": "r007",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7036401",
+      "label": "CN: Required Reserve Ratio",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "rrr_china",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7027801",
+      "label": "CN: Money Supply: YoY: Money and Quasi Money (M2)",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "m2_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7027701",
+      "label": "CN: Money Supply: Money and Quasi Money (M2)",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7027601",
+      "label": "CN: Money Supply: YoY: Money (M1)",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "m1_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "7027501",
+      "label": "CN: Money Supply: Money (M1)",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "6094301",
+      "label": "CN: Trade Balance",
+      "unit": "USD mn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "General Administration of Customs",
+      "logicalId": "trade_balance_usd",
+      "transform": "divide_1000"
+    },
+    {
+      "seriesId": "5190701",
+      "label": "CN: Retail Sales of Consumer Goods: YoY: ytd",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "5190101",
+      "label": "CN: Retail Sales of Consumer Goods: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "retail_sales_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "3959901",
+      "label": "Commodity Building Sold: ytd: Residential: Total",
+      "unit": "RMB mn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "3955901",
+      "label": "Commodity Building Sold: ytd: Total",
+      "unit": "RMB mn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "property_sales_value_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "388484397",
+      "label": "CN: Interbank Bond Collateral Repo Rate: Weighted Avg: Depository Institution: (DR007) 7 Day",
+      "unit": "% pa",
+      "frequency": "Daily",
+      "geo": "China",
+      "source": "National Interbank Funding Center",
+      "logicalId": "dr007",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "384094657",
+      "label": "CN: Producer Price Index: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": "ppi_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "3674401",
+      "label": "CN: Industrial Production: Automobile",
+      "unit": "Unit th",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "356530087",
+      "label": "CN: Import: USD: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "General Administration of Customs",
+      "logicalId": "imports_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "356530077",
+      "label": "CN: Export: USD: YoY",
+      "unit": "%",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "General Administration of Customs",
+      "logicalId": "exports_yoy",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "352659101",
+      "label": "CN: Bond Issuance: ytd: Local Government Bond",
+      "unit": "RMB mn",
+      "frequency": "Quarterly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "lgb_issuance_ytd",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "322664501",
+      "label": "AF: New Increased: Trust Loan",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "322664401",
+      "label": "AF: New Increased: Entrusted Loan",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "322664301",
+      "label": "AF: New Increased: Loan in Foreign Currency",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": null,
+      "transform": "raw"
+    },
+    {
+      "seriesId": "322664201",
+      "label": "AF: New Increased: Loan in Local Currency",
+      "unit": "RMB bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "The People's Bank of China",
+      "logicalId": "tsf_new_rmb_loans",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "317182101",
+      "label": "CN: FX Rate: CFETC: Monthly Avg: USD",
+      "unit": "USD/RMB",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "China Foreign Exchange Trading Center",
+      "logicalId": "usdcny_monthly",
+      "transform": "raw"
+    },
+    {
+      "seriesId": "258218301",
+      "label": "CN: Industrial Production: ytd: Power Generated",
+      "unit": "kWh bn",
+      "frequency": "Monthly",
+      "geo": "China",
+      "source": "National Bureau of Statistics",
+      "logicalId": null,
+      "transform": "raw"
+    }
+  ]
+}

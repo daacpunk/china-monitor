@@ -93,11 +93,13 @@ The output is safe to paste into a support ticket.
 ## 2. Collect
 
 ```bash
-cp manifest.sample.json manifest.json
-$EDITOR manifest.json         # replace every <PLACEHOLDER> with a real CEIC series ID
-python3 collector.py          # dry run → writes out/ceic_<stamp>.{json,csv}
-python3 collector.py --post   # also upload to China Monitor
+cp manifest.mapped.json manifest.json   # series already mapped in China Monitor
+python3 collector.py --manifest manifest.mapped.json
+python3 collector.py --manifest manifest.mapped.json --post
 ```
+
+`manifest.sample.json` is only a template with placeholder IDs. Use
+`manifest.mapped.json` unless you are adding a new series.
 
 `manifest.sample.json` ships **placeholder IDs only** — no fabricated CEIC IDs.
 It targets the six highest-value indicators: total social financing, DR007,
