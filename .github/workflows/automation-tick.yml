@@ -6,6 +6,9 @@ name: Automation tick
 # when one is actually due, and a runningAt lock prevents double-runs.
 #
 # Requires repo secret AUTOMATION_TICK_TOKEN to match the same env var on Railway.
+#
+# Optional repo variable TICK_TIMEOUT_SECONDS overrides curl --max-time.
+# Unset/empty keeps the live default of 300 seconds. Job timeout-minutes stays 10.
 
 on:
   schedule:
@@ -26,20 +29,58 @@ jobs:
         env:
           TICK_TOKEN: ${{ secrets.AUTOMATION_TICK_TOKEN }}
           BASE_URL: https://china-monitor-production.up.railway.app
+          TICK_TIMEOUT_SECONDS: ${{ vars.TICK_TIMEOUT_SECONDS || 300 }}
         run: |
+          write_summary() {
+            local status="$1"
+            local duration="$2"
+            local body="$3"
+            local note="$4"
+            {
+              echo "## Automation tick"
+              echo ""
+              if [ "$status" != "200" ]; then
+                echo "**FAILED** — tick did not return HTTP 200."
+                echo ""
+              fi
+              echo "| Field | Value |"
+              echo "| --- | --- |"
+              echo "| HTTP status | \`${status:-(no HTTP status)}\` |"
+              echo "| Duration | ${duration}s |"
+              echo "| curl --max-time | ${TICK_TIMEOUT_SECONDS}s |"
+              echo ""
+              echo "### Response body (truncated)"
+              echo ""
+              echo '```'
+              printf '%s' "$body" | head -c 500
+              echo
+              echo '```'
+              if [ -n "$note" ]; then
+                echo ""
+                echo "$note"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
           if [ -z "$TICK_TOKEN" ]; then
             echo "::error::AUTOMATION_TICK_TOKEN secret is not set"
+            write_summary "(no request)" "0" "" "AUTOMATION_TICK_TOKEN secret is not set. No request was sent."
             exit 1
           fi
           echo "Calling $BASE_URL/api/jobs/tick"
-          RESP=$(curl -sS --max-time 300 -w "\n%{http_code}" \
+          START=$(date +%s)
+          RESP=$(curl -sS --max-time "$TICK_TIMEOUT_SECONDS" -w "\n%{http_code}" \
             -X POST "$BASE_URL/api/jobs/tick" \
             -H "X-Tick-Token: $TICK_TOKEN")
+          END=$(date +%s)
+          DURATION=$((END - START))
           BODY=$(echo "$RESP" | head -n -1)
           CODE=$(echo "$RESP" | tail -n 1)
           echo "HTTP $CODE"
           echo "Response: $BODY"
           if [ "$CODE" != "200" ]; then
             echo "::error::Tick endpoint returned HTTP $CODE"
+            write_summary "$CODE" "$DURATION" "$BODY" "Tick endpoint returned HTTP ${CODE:-(no HTTP status)}."
             exit 1
           fi
+          write_summary "$CODE" "$DURATION" "$BODY" ""
