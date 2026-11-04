@@ -310,7 +310,9 @@ async function ceicDigest(): Promise<string> {
         .map((x) => `${x.logicalId} (last ${x.lastDate ?? "n/a"}${x.ageDays != null ? `, ${x.ageDays}d` : ""})`)
         .join("; ");
       lines.push(
-        `  DATA QUALITY: ${s.staleSeries.length} mapped CEIC series are stale and have been DEFERRED to free fallbacks (AKShare/FRED/NBS/OECD) where those are fresher: ${worst}. Treat any CEIC-sourced figure for these as provisional and say so in the note.`,
+        s.staleSeries.every((x) => x.reason === "source_lag")
+          ? `  DATA QUALITY: the CEIC import is current, but ${s.staleSeries.length} mapped series have no newer published observation: ${worst}. Do not describe this as a failed refresh. Say the latest available CEIC print and its date.`
+          : `  DATA QUALITY: ${s.staleSeries.length} mapped CEIC series are past their freshness window: ${worst}. Prefer a fresher free source where one exists, and say the figure is provisional.`,
       );
     }
     return lines.join("\n");

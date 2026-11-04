@@ -218,7 +218,9 @@ export async function buildDocModel(note: StrategyNote): Promise<DocModel> {
         (s.latestObservationDate ? `, latest observation ${s.latestObservationDate}` : "") +
         (s.latestVintageDate ? `, vintage ${s.latestVintageDate}` : "") +
         (s.staleSeries.length
-          ? `. ${s.staleSeries.length} mapped CEIC series were stale and deferred to free fallbacks (AKShare/FRED/NBS/OECD).`
+          ? s.staleSeries.every((x) => x.reason === "source_lag")
+            ? `. ${s.staleSeries.length} mapped series have no newer CEIC print; the import itself is current.`
+            : `. ${s.staleSeries.length} mapped CEIC series are past their freshness window.`
           : ".");
     }
   } catch {

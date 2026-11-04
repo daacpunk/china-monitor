@@ -68,7 +68,7 @@ interface CeicStatus {
   latestObservationDate: string | null;
   latestVintageDate: string | null;
   latestImportAt: string | null;
-  staleSeries: { seriesId: string; logicalId: string; lastDate: string | null; ageDays: number | null }[];
+  staleSeries: { seriesId: string; logicalId: string; label?: string | null; lastDate: string | null; ageDays: number | null; reason?: string }[];
   freshSeriesCount: number;
   lastError: string | null;
   summary: string;
@@ -379,10 +379,14 @@ export default function ImportsCeic() {
           <Alert className="mt-3" data-testid="alert-ceic-stale">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="text-xs">
-              <span className="font-medium">{status.staleSeries.length} mapped CEIC series are stale.</span>{" "}
-              They are not overriding fresher free sources — the report falls back to
-              AKShare/FRED/NBS/OECD and adds a data-quality note. Refresh the CDMNext export
-              or re-run the collector.
+              <span className="font-medium">
+                {status.staleSeries.every((s) => s.reason === "source_lag")
+                  ? `${status.staleSeries.length} mapped series have no newer CEIC print.`
+                  : `${status.staleSeries.length} mapped CEIC series are past their freshness window.`}
+              </span>{" "}
+              {status.staleSeries.every((s) => s.reason === "source_lag")
+                ? "The import is current. Another collector run will not move these until CEIC publishes a new observation."
+                : "Refresh the CDMNext export or re-run the collector. A stale import is not allowed to override a fresher free source."}{" "}
               <div className="mt-1 font-mono text-[10px] opacity-80">
                 {status.staleSeries.slice(0, 6).map((s) => (
                   <div key={s.seriesId}>

@@ -155,14 +155,10 @@ async function ceicApiEnabled(): Promise<boolean> {
   return value;
 }
 
-/** Freshness budget in days, by CEIC frequency label. */
-function staleBudgetDays(frequency: string | null | undefined): number {
-  const f = (frequency ?? "").toLowerCase();
-  if (f.startsWith("d")) return 10;
-  if (f.startsWith("w")) return 24;
-  if (f.startsWith("q")) return 190;
-  if (f.startsWith("a") || f.startsWith("y")) return 500;
-  return 75; // monthly + unknown
+/** Freshness budget in days, by CEIC frequency label. Shared with the status banner. */
+async function staleBudgetDays(frequency: string | null | undefined): Promise<number> {
+  const { ceicStaleBudgetDays } = await import("../clients/ceicSource");
+  return ceicStaleBudgetDays(frequency);
 }
 
 /**
@@ -248,9 +244,11 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
         );
         const lastDate = asc[asc.length - 1].date;
         const vintageDate = withValues[0]?.vintageDate ?? catEntry.lastFileVintage ?? undefined;
-        const budget = staleBudgetDays(catEntry.frequency);
+        const budget = await staleBudgetDays(catEntry.frequency);
         const ageDays = Math.floor((Date.now() - Date.parse(`${lastDate}T00:00:00Z`)) / 86_400_000);
         const stale = Number.isFinite(ageDays) && ageDays > budget;
+        const importedAt = catEntry.lastImportedAt ? new Date(catEntry.lastImportedAt).getTime() : NaN;
+        const importCurrent = Number.isFinite(importedAt) && Date.now() - importedAt <= 10 * 86_400_000;
         const mode: "python_bridge" | "cdm_import" =
           catEntry.sourceMode === "python_bridge" ? "python_bridge" : "cdm_import";
         const result: SeriesResult = {
@@ -267,7 +265,9 @@ export async function fetchSeries(logicalId: string, _opts?: { count?: number; s
             vintageDate,
             stale,
             qualityNote: stale
-              ? `CEIC ${mode === "python_bridge" ? "bridge" : "CDM import"} for ${logicalId} is stale: latest observation ${lastDate} (${ageDays}d old, budget ${budget}d). Refresh the CDMNext export or re-run the collector.`
+              ? importCurrent
+                ? `CEIC ${mode === "python_bridge" ? "bridge" : "CDM import"} for ${logicalId} is current, but CEIC has not published a newer observation than ${lastDate} (${ageDays}d old, budget ${budget}d). Do not treat this as a failed refresh.`
+                : `CEIC ${mode === "python_bridge" ? "bridge" : "CDM import"} for ${logicalId} is stale: latest observation ${lastDate} (${ageDays}d old, budget ${budget}d). Refresh the CDMNext export or re-run the collector.`
               : undefined,
           },
         };

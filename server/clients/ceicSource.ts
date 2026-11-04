@@ -33,8 +33,22 @@ export type CeicSourceMode = "api" | "python_bridge" | "cdm_import" | "unavailab
 
 /** Optional operator override, stored in `settings` under this key. */
 export const CEIC_MODE_SETTING_KEY = "ceic_source_mode";
-/** Freshness budget before a mapped CEIC import is called stale (days). */
+/** Freshness budget for monthly series, and for an unknown frequency (days). */
 export const CEIC_DEFAULT_STALE_DAYS = 75;
+/** Import younger than this is treated as current. An old print is then source lag, not a missed refresh. */
+const CEIC_IMPORT_CURRENT_DAYS = 10;
+
+export type CeicStaleReason = "source_lag" | "refresh_due";
+
+/** Same cadence budgets used when a mapped series is allowed to beat free fallbacks. */
+export function ceicStaleBudgetDays(frequency: string | null | undefined): number {
+  const f = (frequency ?? "").toLowerCase();
+  if (f.startsWith("d")) return 10;
+  if (f.startsWith("w")) return 24;
+  if (f.startsWith("q")) return 190;
+  if (f.startsWith("a") || f.startsWith("y")) return 500;
+  return CEIC_DEFAULT_STALE_DAYS;
+}
 
 export interface CeicStatus {
   /** Effective mode after applying the override and observed evidence. */
@@ -67,8 +81,23 @@ export interface CeicStatus {
     rowCount: number;
     importedAt: string | null;
   }[];
-  /** Mapped series whose latest observation is older than the stale budget. */
-  staleSeries: { seriesId: string; logicalId: string; lastDate: string | null; ageDays: number | null }[];
+  /**
+   * Winning mapped series whose latest observation is past the frequency budget.
+   * A duplicate mapping that loses to a fresher series is not listed here.
+   */
+  staleSeries: {
+    seriesId: string;
+    logicalId: string;
+    label: string | null;
+    frequency: string | null;
+    lastDate: string | null;
+    ageDays: number | null;
+    budgetDays: number;
+    /** source_lag: the import is current and CEIC has no newer point. refresh_due: the import itself is old. */
+    reason: CeicStaleReason;
+  }[];
+  /** Older mappings dropped because a fresher series already owns the logical ID. */
+  supersededSeries: { seriesId: string; logicalId: string; lastDate: string | null; keptSeriesId: string }[];
   freshSeriesCount: number;
   lastError: string | null;
   /** One-line human summary used by diagnostics + the report evidence block. */
@@ -149,16 +178,51 @@ export async function getCeicStatus(): Promise<CeicStatus> {
     lastError = lastError ?? `import ledger unavailable: ${e?.message ?? e}`;
   }
 
-  // Freshness of MAPPED series only — unmapped catalog rows do not feed reports.
+  // Freshness of the winning mapped series only. A second CEIC series that
+  // shares a logical ID does not make the book stale if a fresher one owns it.
   const staleSeries: CeicStatus["staleSeries"] = [];
+  const supersededSeries: CeicStatus["supersededSeries"] = [];
   let freshSeriesCount = 0;
   try {
     const catalog = await storage.listCeicCatalog();
+    const byLogical = new Map<string, typeof catalog>();
     for (const c of catalog) {
       if (!c.logicalId) continue;
-      const a = ageDays(c.lastDate);
-      if (a != null && a <= CEIC_DEFAULT_STALE_DAYS) freshSeriesCount += 1;
-      else staleSeries.push({ seriesId: c.seriesId, logicalId: c.logicalId, lastDate: c.lastDate ?? null, ageDays: a });
+      const group = byLogical.get(c.logicalId) ?? [];
+      group.push(c);
+      byLogical.set(c.logicalId, group);
+    }
+    const importAge = ageDays(stats.latestImportAt?.slice(0, 10));
+    const importCurrent = importAge != null && importAge <= CEIC_IMPORT_CURRENT_DAYS;
+    for (const [logicalId, rows] of Array.from(byLogical.entries())) {
+      const ranked = [...rows].sort((a, b) => (b.lastDate ?? "").localeCompare(a.lastDate ?? ""));
+      const winner = ranked[0];
+      for (const loser of ranked.slice(1)) {
+        if ((loser.lastDate ?? "") >= (winner.lastDate ?? "")) continue;
+        supersededSeries.push({
+          seriesId: loser.seriesId,
+          logicalId,
+          lastDate: loser.lastDate ?? null,
+          keptSeriesId: winner.seriesId,
+        });
+        // Drop the losing mapping so the next import does not keep it via COALESCE.
+        await storage.setCeicMapping(loser.seriesId, null, loser.transform ?? null).catch(() => undefined);
+      }
+      const a = ageDays(winner.lastDate);
+      const budget = ceicStaleBudgetDays(winner.frequency);
+      if (a != null && a <= budget) freshSeriesCount += 1;
+      else {
+        staleSeries.push({
+          seriesId: winner.seriesId,
+          logicalId,
+          label: winner.label ?? null,
+          frequency: winner.frequency ?? null,
+          lastDate: winner.lastDate ?? null,
+          ageDays: a,
+          budgetDays: budget,
+          reason: importCurrent ? "source_lag" : "refresh_due",
+        });
+      }
     }
   } catch (e: any) {
     lastError = lastError ?? `catalog read failed: ${e?.message ?? e}`;
@@ -194,7 +258,11 @@ export async function getCeicStatus(): Promise<CeicStatus> {
       : `CEIC via ${mode.replace("_", " ")}: ${stats.catalogCount} catalog series, ${stats.mappedCount} mapped, ` +
         `${stats.observationCount} observations across ${stats.vintageCount} vintage rows` +
         (stats.latestObservationDate ? `, latest observation ${stats.latestObservationDate}` : "") +
-        (staleSeries.length ? `, ${staleSeries.length} mapped series stale` : "") +
+        (staleSeries.length
+          ? staleSeries.every((s) => s.reason === "source_lag")
+            ? `, ${staleSeries.length} mapped series have no newer CEIC print`
+            : `, ${staleSeries.filter((s) => s.reason === "refresh_due").length} mapped series need a refresh`
+          : "") +
         ".";
 
   return {
@@ -216,6 +284,7 @@ export async function getCeicStatus(): Promise<CeicStatus> {
     lastRunByMode: stats.byMode,
     recentFiles,
     staleSeries,
+    supersededSeries,
     freshSeriesCount,
     lastError,
   summary,

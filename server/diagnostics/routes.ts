@@ -77,11 +77,14 @@ function ceicLimitation(ceic: any): string {
   }
   if (mode === "cdm_import" || mode === "python_bridge") {
     const via = mode === "cdm_import" ? "CDMNext Excel/CSV export" : "local Python bridge";
-    const stale = ceic?.staleSeries?.length ?? 0;
+    const stale = ceic?.staleSeries ?? [];
+    const lag = stale.filter((s: { reason?: string }) => s.reason === "source_lag").length;
+    const due = stale.length - lag;
     return (
       `CEIC: no REST data entitlement on the current key, so CEIC arrives via ${via} ` +
       `(${ceic?.mappedCount ?? 0} of ${ceic?.catalogCount ?? 0} catalog series mapped to logical IDs` +
-      (stale ? `, ${stale} stale and currently deferring to free fallbacks` : "") +
+      (due ? `, ${due} need a refresh` : "") +
+      (lag ? `, ${lag} have no newer CEIC print` : "") +
       "). AKShare/FRED/NBS/OECD still cover every unmapped series."
     );
   }
@@ -208,7 +211,7 @@ export function registerDiagnosticsRoutes(app: Express): void {
           // = nothing configured yet.
           status:
             ceic.mode === "api" || ceic.mode === "python_bridge" || ceic.mode === "cdm_import"
-              ? ceic.staleSeries?.length
+              ? (ceic.staleSeries ?? []).some((s: { reason?: string }) => s.reason === "refresh_due")
                 ? "degraded"
                 : "ok"
               : "down",

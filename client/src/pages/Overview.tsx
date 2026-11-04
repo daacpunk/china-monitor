@@ -28,17 +28,39 @@ import { ExternalLink, ArrowRight } from "lucide-react";
 // ─── LiveStatCard ─────────────────────────────────────────────────────────────
 
 function CeicStaleBanner() {
-  const q = useQuery<{ staleSeries?: unknown[]; latestObservationDate?: string | null; summary?: string }>({
+  const q = useQuery<{
+    staleSeries?: { seriesId: string; logicalId: string; label?: string | null; lastDate?: string | null; reason?: string }[];
+    latestObservationDate?: string | null;
+    latestImportAt?: string | null;
+  }>({
     queryKey: ["/api/ceic/status"],
     queryFn: async () => (await apiRequest("GET", "/api/ceic/status")).json(),
   });
-  const n = q.data?.staleSeries?.length ?? 0;
-  if (!n) return null;
+  const stale = q.data?.staleSeries ?? [];
+  if (!stale.length) return null;
+  const due = stale.filter((s) => s.reason === "refresh_due");
+  const lag = stale.filter((s) => s.reason !== "refresh_due");
+  const imported = q.data?.latestImportAt?.slice(0, 10);
+  if (!due.length) {
+    return (
+      <Card className="mb-6 p-4">
+        <h2 className="text-sm font-semibold">CEIC book is current</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Imported {imported ?? "recently"}, latest observation {q.data?.latestObservationDate ?? "unknown"}. {lag.length === 1 ? "One mapped series has" : `${lag.length} mapped series have`} no newer print in that import. Another Mac refresh will not move {lag.length === 1 ? "it" : "them"} until CEIC publishes a new point.
+        </p>
+        <ul className="mt-2 text-sm text-muted-foreground">
+          {lag.map((s) => (
+            <li key={s.seriesId}>{s.label || s.logicalId} · last {s.lastDate ?? "unknown"}</li>
+          ))}
+        </ul>
+      </Card>
+    );
+  }
   return (
     <Card className="mb-6 border-amber-500/40 bg-amber-500/5 p-4">
-      <h2 className="text-sm font-semibold">CEIC book is stale</h2>
+      <h2 className="text-sm font-semibold">CEIC refresh is due</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {n} mapped series are past their freshness window. Latest observation {q.data?.latestObservationDate ?? "unknown"}. China Monitor cannot pull CEIC from Railway. Refresh from your Mac with the local collector, or upload a new CDM Excel file under Imports.
+        {due.length} mapped series are past their freshness window and the import itself is old. Latest observation {q.data?.latestObservationDate ?? "unknown"}. China Monitor cannot pull CEIC from Railway. Refresh from your Mac with the local collector, or upload a new CDM Excel file under Imports.
       </p>
     </Card>
   );
