@@ -694,6 +694,32 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
   // ════════════════ 5f. RELATIVE & GLOBAL CONTEXT (Gap F) ════════════════
   renderRelativeContextSection(pptx, model, { newSlide, heading, W, H });
 
+  // ════════════════ 5g0. PAPER BOOK ════════════════
+  try {
+    const { buildPaperBook } = await import("../equity/paperBook");
+    const book = await buildPaperBook();
+    if (book.lines.length) {
+      const s = newSlide();
+      heading(s, "Paper book since recommendation", book.noteDate ?? book.asOf);
+      const header: PptxGenJS.TableRow = ["Name", "Stance", "Wt", "Return", "Contrib"].map((t) => ({
+        text: t, options: { bold: true, color: "FFFFFF", fill: { color: ACCENT }, fontSize: 11 },
+      }));
+      const rows: PptxGenJS.TableRow[] = [header, ...book.lines.slice(0, 12).map((l) => [
+        { text: `${l.nameEn} (${l.symbol})`, options: { fontSize: 10, color: C.body } },
+        { text: l.stance, options: { fontSize: 10, color: C.body } },
+        { text: l.weight == null ? "—" : `${l.weight.toFixed(0)}%`, options: { fontSize: 10, color: C.body } },
+        { text: l.returnPct == null ? "—" : `${l.returnPct.toFixed(1)}%`, options: { fontSize: 10, color: C.body } },
+        { text: l.contributionPct == null ? "—" : l.contributionPct.toFixed(2), options: { fontSize: 10, color: C.body } },
+      ])];
+      s.addTable(rows, { x: 0.4, y: 1.5, w: W - 0.8, colW: [4.2, 1.4, 1.2, 1.6, 1.6], border: { type: "solid", color: C.line, pt: 1 } });
+      s.addText(`Book contribution ${book.bookReturnPct == null ? "n/a" : book.bookReturnPct.toFixed(2) + " pp"}. Connect eligibility not verified.`, {
+        x: 0.5, y: 6.3, w: W - 1, h: 0.3, fontSize: 11, color: C.muted,
+      });
+    }
+  } catch (err) {
+    console.error("[pptx] paper book slide skipped", err);
+  }
+
   // ════════════════ 5g. CREDIT / LIQUIDITY / NOWCAST ════════════════
   try {
     const { buildTransmission } = await import("../analysis/transmission");

@@ -39,6 +39,7 @@ export interface ReportContext {
   sonarDigest: string;
   /** Self-scoring block: hit rate + a notable recently-resolved call. */
   trackRecordDigest: string;
+  paperBookDigest: string;
   /**
    * Phase 7: one compact line describing how CEIC data reached this report
    * (REST API vs CDMNext import vs local Python bridge), plus any stale-import
@@ -371,12 +372,13 @@ export async function assembleContext(opts: {
     );
   }
 
-  const [macro, policy, sector, hv, track, ceic, ...sonars] = await Promise.all([
+  const [macro, policy, sector, hv, track, paper, ceic, ...sonars] = await Promise.all([
     macroDigest(),
     policyDigest(emphasis),
     sectorDigest(emphasis, featuredNames),
     storage.getHouseView().catch(() => undefined),
     trackRecordDigest().catch(() => ""),
+    import("../equity/paperBook").then((m) => m.buildPaperBook()).then((b) => b.digest).catch(() => ""),
     ceicDigest().catch(() => ""),
     ...sonarTasks,
   ]);
@@ -397,6 +399,7 @@ export async function assembleContext(opts: {
     houseView: hv ?? null,
     sonarDigest: sonars.map((s) => s.text).filter(Boolean).join("\n\n"),
     trackRecordDigest: track ?? "",
+    paperBookDigest: (paper as string) ?? "",
     ceicDigest: (ceic as string) ?? "",
     citations: dedupCitations.slice(0, 60),
   };
@@ -420,6 +423,7 @@ export function contextToPrompt(ctx: ReportContext): string {
     ctx.sonarDigest,
     "",
     ctx.trackRecordDigest,
+    ctx.paperBookDigest,
     "",
     ctx.ceicDigest,
     "",

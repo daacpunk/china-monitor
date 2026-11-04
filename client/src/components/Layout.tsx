@@ -52,6 +52,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/scenarios", label: "Scenarios", icon: Sparkles, group: "Analysis" },
   { slug: "/brief", label: "Brief", icon: Newspaper, group: "Analysis" },
   { slug: "/track-record", label: "Track Record", icon: Target, group: "Analysis" },
+  { slug: "/paper-book", label: "Paper Book", icon: FileText, group: "Analysis" },
   // ─── Report group (Phase 3) ───
   { slug: "/report", label: "Strategy Report", icon: FileText, group: "Report" },
   { slug: "/automation", label: "Automation", icon: CalendarClock, group: "Report" },

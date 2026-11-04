@@ -554,6 +554,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.get("/api/equity/paper-book", async (_req, res) => {
+    try {
+      const { buildPaperBook } = await import("./equity/paperBook");
+      res.json(await buildPaperBook());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/transmission — credit, liquidity, property, weekly nowcast, forward calendar. */
   app.get("/api/transmission", async (_req, res) => {
     try {

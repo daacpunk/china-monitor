@@ -33,6 +33,7 @@ import Imports from "@/pages/Imports";
 import Costs from "@/pages/Costs";
 import Diagnostics from "@/pages/Diagnostics";
 import TrackRecord from "@/pages/TrackRecord";
+import PaperBook from "@/pages/PaperBook";
 
 function AppRouter() {
   const [location] = useLocation();
@@ -66,6 +67,7 @@ function AppRouter() {
         <Route path="/costs" component={Costs} />
         <Route path="/diagnostics" component={Diagnostics} />
         <Route path="/track-record" component={TrackRecord} />
+        <Route path="/paper-book" component={PaperBook} />
         <Route component={NotFound} />
       </Switch>
       </ErrorBoundary>

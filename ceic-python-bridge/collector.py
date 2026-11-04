@@ -303,6 +303,32 @@ def save_state(state: dict[str, str]) -> None:
 
 # ── Upload ──────────────────────────────────────────────────────────────────
 
+def chunk_series(series: list[dict[str, Any]], max_points: int = 800) -> list[list[dict[str, Any]]]:
+    """Split a collector payload so one Railway request does not time out."""
+    chunks: list[list[dict[str, Any]]] = []
+    cur: list[dict[str, Any]] = []
+    n = 0
+    for s in series:
+        pts = list(s.get("points") or [])
+        i = 0
+        while i < len(pts):
+            take = pts[i:i + max_points]
+            i += max_points
+            piece = dict(s)
+            piece["points"] = take
+            if cur and n + len(take) > max_points:
+                chunks.append(cur)
+                cur, n = [], 0
+            cur.append(piece)
+            n += len(take)
+            if n >= max_points:
+                chunks.append(cur)
+                cur, n = [], 0
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 def post_to_china_monitor(base_url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = base_url.rstrip("/") + "/api/imports/ceic-bridge"
     body = json.dumps(payload).encode("utf-8")
@@ -318,7 +344,7 @@ def post_to_china_monitor(base_url: str, token: str, payload: dict[str, Any]) ->
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:600]
@@ -428,14 +454,18 @@ def main() -> int:
             die("CHINA_MONITOR_URL is not set (e.g. https://your-app.up.railway.app).", 3)
         if not token:
             die("CEIC_IMPORT_TOKEN is not set — it must match the value configured on Railway.", 3)
-        res = post_to_china_monitor(base, token, payload)
-        commit = res.get("commit", {})
-        log(
-            "upload ok: "
-            f"duplicate={commit.get('duplicate')} series={commit.get('seriesCount')} "
-            f"vintageRows={commit.get('vintageRows')} currentRows={commit.get('currentRows')} "
-            f"mapped={len(commit.get('mappedSeries') or [])}"
-        )
+        chunks = chunk_series(collected, 800)
+        for i, chunk in enumerate(chunks, 1):
+            res = post_to_china_monitor(base, token, {
+                "runId": f"{stamp}-{i}",
+                "vintageDate": vintage,
+                "series": chunk,
+            })
+            commit = res.get("commit", {})
+            log(
+                f"upload chunk {i}/{len(chunks)} ok: "
+                f"series={commit.get('seriesCount')} currentRows={commit.get('currentRows')}"
+            )
 
     save_state(state)
     log(f"state saved for {len(state)} series")
