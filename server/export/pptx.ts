@@ -694,7 +694,27 @@ export async function renderPptx(model: DocModel): Promise<Buffer> {
   // ════════════════ 5f. RELATIVE & GLOBAL CONTEXT (Gap F) ════════════════
   renderRelativeContextSection(pptx, model, { newSlide, heading, W, H });
 
-  // ════════════════ 5g. TRACK RECORD (self-scorecard) ════════════════
+  // ════════════════ 5g. CREDIT / LIQUIDITY / NOWCAST ════════════════
+  try {
+    const { buildTransmission } = await import("../analysis/transmission");
+    const tx = await buildTransmission();
+    const s = newSlide();
+    heading(s, "Credit, liquidity, and weekly nowcast", tx.asOf);
+    const lines = [
+      `Incomplete TSF flow: ${tx.credit.incompleteTsfFlow ? tx.credit.incompleteTsfFlow.value.toFixed(0) + " RMB bn (" + tx.credit.coverage + ")" : "n/a"}`,
+      `Liquidity: ${tx.liquidity.regime}. ${tx.liquidity.why}`,
+      `Property: ${tx.property.regime}. ${tx.property.why}`,
+      `Nowcast: ${tx.nowcast.label}${tx.nowcast.score != null ? " " + tx.nowcast.score : ""}. ${tx.nowcast.why}`,
+      ...tx.calendar.slice(0, 5).map((c) => `${c.date} ${c.agency} ${c.indicator}`),
+    ];
+    s.addText(lines.map((t) => `• ${t}`).join("\n"), {
+      x: 0.5, y: 1.5, w: W - 1, h: 4.6, fontSize: 14, color: C.body, valign: "top",
+    });
+  } catch (err) {
+    console.error("[pptx] transmission slide skipped", err);
+  }
+
+  // ════════════════ 5h. TRACK RECORD (self-scorecard) ════════════════
   // Compact: overall hit rate + by-kind. Best-effort — an empty or failing
   // scorecard simply omits the slide rather than breaking the export.
   try {

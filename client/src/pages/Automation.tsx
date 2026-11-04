@@ -29,7 +29,7 @@ import { useLlmCatalog } from "@/hooks/useLlmCatalog";
 type Mode = "data_driven" | "thesis_driven";
 // Catalog-driven (GET /api/llm/models) — no frozen list here.
 type ModelId = string;
-const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer"] as const;
+const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer", "robotics", "optics", "memory", "power"] as const;
 
 interface AutomationConfig {
   enabled: boolean;

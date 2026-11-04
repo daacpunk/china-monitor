@@ -18,6 +18,7 @@ import KShape from "@/pages/KShape";
 import Margins from "@/pages/Margins";
 import Property from "@/pages/Property";
 import Outlook from "@/pages/Outlook";
+import Transmission from "@/pages/Transmission";
 import Policy from "@/pages/Policy";
 import Sectors from "@/pages/Sectors";
 import Report from "@/pages/Report";
@@ -50,6 +51,7 @@ function AppRouter() {
         <Route path="/margins" component={Margins} />
         <Route path="/property" component={Property} />
         <Route path="/outlook" component={Outlook} />
+        <Route path="/transmission" component={Transmission} />
         <Route path="/policy" component={Policy} />
         <Route path="/sectors" component={Sectors} />
         <Route path="/report" component={Report} />

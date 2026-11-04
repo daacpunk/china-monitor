@@ -12,7 +12,7 @@
  * Shared shape with the client via /api/equity/universe.
  */
 
-export type CoverageTheme = "tech" | "ev" | "battery" | "semi" | "ai" | "consumer";
+export type CoverageTheme = "tech" | "ev" | "battery" | "semi" | "ai" | "consumer" | "robotics" | "optics" | "memory" | "power";
 export type EquityMarket = "ashare" | "hk";
 export type NameRole = "leader" | "challenger" | "supplier" | "platform";
 
@@ -152,6 +152,70 @@ export const SECTOR_UNIVERSE: SectorTheme[] = [
       { symbol: "02020", market: "hk", nameEn: "Anta Sports", nameZh: "安踏体育", role: "leader", thesis: "Multi-brand sportswear leader (Fila/Amer); premiumization" },
       { symbol: "09633", market: "hk", nameEn: "Nongfu Spring", nameZh: "农夫山泉", role: "leader", thesis: "Bottled water + beverages; brand strength" },
       { symbol: "02319", market: "hk", nameEn: "Mengniu Dairy", nameZh: "蒙牛乳业", role: "challenger", thesis: "Dairy demand recovery; margin normalization" },
+    ],
+  },
+  {
+    id: "robotics",
+    label: "Robotics & automation",
+    indexProxies: ["chinext_close", "star50_close"],
+    drivers: [
+      "Industrial capex and factory automation vs weak FAI",
+      "Humanoid narrative versus shipped joints, reducers, and actuators",
+      "Export controls on high-end motion control and sensors",
+    ],
+    names: [
+      { symbol: "300124", market: "ashare", nameEn: "Inovance", nameZh: "汇川技术", role: "leader", thesis: "Industrial automation and motion-control leader; humanoid optionality is not the base case" },
+      { symbol: "002747", market: "ashare", nameEn: "Estun", nameZh: "埃斯顿", role: "challenger", thesis: "Industrial robot pure-play; volume versus price is the watch item" },
+      { symbol: "688017", market: "ashare", nameEn: "Leaderdrive", nameZh: "绿的谐波", role: "supplier", thesis: "Harmonic reducer supplier; content per humanoid is the claim to test" },
+      { symbol: "002050", market: "ashare", nameEn: "Sanhua", nameZh: "三花智控", role: "supplier", thesis: "Thermal and actuator content into EVs and, later, robots" },
+      { symbol: "09880", market: "hk", nameEn: "UBTECH", nameZh: "优必选", role: "challenger", thesis: "Listed humanoid name; separate orders from demonstrations" },
+    ],
+  },
+  {
+    id: "optics",
+    label: "Optical transceivers",
+    indexProxies: ["chinext_close", "star50_close"],
+    drivers: [
+      "AI cluster optical content (800G/1.6T) versus a one-quarter order air pocket",
+      "HS85 electronics export cycle as a coarse proxy, not a company print",
+      "US entity-list and customer-concentration risk",
+    ],
+    names: [
+      { symbol: "300308", market: "ashare", nameEn: "Zhongji Innolight", nameZh: "中际旭创", role: "leader", thesis: "High-speed optical module leader; AI transceiver cycle" },
+      { symbol: "300502", market: "ashare", nameEn: "Eoptolink", nameZh: "新易盛", role: "challenger", thesis: "Optical module challenger; customer mix and ASP" },
+      { symbol: "002281", market: "ashare", nameEn: "Accelink", nameZh: "光迅科技", role: "supplier", thesis: "Broader optical components; less pure AI beta than Innolight" },
+    ],
+  },
+  {
+    id: "memory",
+    label: "Memory & interface",
+    indexProxies: ["star50_close", "chinext_close"],
+    drivers: [
+      "Server DRAM and HBM price cycle versus domestic bit qualification",
+      "HS85 import cycle as a coarse chip-import proxy",
+      "CXMT/YMTC are not in this listed book; these names are the listed proxies",
+    ],
+    names: [
+      { symbol: "688008", market: "ashare", nameEn: "Montage Technology", nameZh: "澜起科技", role: "supplier", thesis: "Memory-interface and DDR5/AI-server content; already in semis, repeated here as the memory proxy" },
+      { symbol: "603986", market: "ashare", nameEn: "GigaDevice", nameZh: "兆易创新", role: "leader", thesis: "NOR and MCU; not an HBM pure play" },
+      { symbol: "301308", market: "ashare", nameEn: "Longsys", nameZh: "江波龙", role: "challenger", thesis: "Module and branded memory; price-cycle leverage" },
+      { symbol: "688525", market: "ashare", nameEn: "Biwin", nameZh: "佰维存储", role: "challenger", thesis: "Storage module name; treat as cycle beta, not foundry self-sufficiency" },
+    ],
+  },
+  {
+    id: "power",
+    label: "Power equipment & grid",
+    indexProxies: ["csi300_close", "chinext_close"],
+    drivers: [
+      "Data-center and grid capex versus delivered power, not announced GW",
+      "Electricity generation as the coarse activity check",
+      "Export of inverters and transformers versus trade defence",
+    ],
+    names: [
+      { symbol: "300274", market: "ashare", nameEn: "Sungrow", nameZh: "阳光电源", role: "leader", thesis: "Inverters and storage conversion; AI-power demand is an overlay, not the whole book" },
+      { symbol: "600406", market: "ashare", nameEn: "NARI Technology", nameZh: "国电南瑞", role: "leader", thesis: "Grid automation; the domestic grid-spend proxy" },
+      { symbol: "600089", market: "ashare", nameEn: "TBEA", nameZh: "特变电工", role: "supplier", thesis: "Transformers and power equipment; export plus grid" },
+      { symbol: "002028", market: "ashare", nameEn: "Sieyuan Electric", nameZh: "思源电气", role: "supplier", thesis: "Grid equipment; order backlog versus margin" },
     ],
   },
 ];

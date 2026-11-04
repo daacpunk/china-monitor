@@ -34,7 +34,7 @@ type Mode = "data_driven" | "thesis_driven";
 // Model ids are catalog-driven (GET /api/llm/models) so newly registered models
 // are selectable without a frontend redeploy.
 type ModelId = string;
-const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer"] as const;
+const THEMES = ["tech", "ev", "battery", "semi", "ai", "consumer", "robotics", "optics", "memory", "power"] as const;
 
 interface NoteSection { key: string; heading: string; body: string; }
 interface PortfolioPick {

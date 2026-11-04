@@ -240,6 +240,8 @@ export default function Outlook() {
       {/* Static GDP forecast chart */}
       {forecastChart && (
         <Card className="p-5">
+          <h2 className="text-sm font-semibold mb-1">Archived GDP chart, not a live consensus</h2>
+          <p className="mb-3 text-xs text-muted-foreground">This chart is a static illustration. It is not FactSet, Wind, or CEIC consensus. The weekly nowcast is on Transmission. A house GDP path is used in the strategy note only after you save one.</p>
           <h2 className="text-sm font-semibold mb-3">2025-2027 real GDP growth forecasts (%)</h2>
           <div className="h-80"><Line options={baseChartOptions as any} data={forecastChart} /></div>
           <p className="text-xs text-muted-foreground mt-3">

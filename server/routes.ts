@@ -554,6 +554,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  /** GET /api/transmission — credit, liquidity, property, weekly nowcast, forward calendar. */
+  app.get("/api/transmission", async (_req, res) => {
+    try {
+      const { buildTransmission } = await import("./analysis/transmission");
+      res.json(await buildTransmission());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/outlook/house-forecast", async (_req, res) => {
+    const row = await storage.getSetting("house_gdp_forecast");
+    res.json(row?.valueJson ?? { rows: [], note: "", updatedAt: null });
+  });
+
+  app.post("/api/outlook/house-forecast", async (req, res) => {
+    try {
+      const body = z.object({
+        rows: z.array(z.object({ year: z.number().int().min(2024).max(2035), gdpYoy: z.number() })).max(8),
+        note: z.string().max(800).optional(),
+      }).parse(req.body ?? {});
+      const value = { ...body, updatedAt: new Date().toISOString(), source: "house" };
+      await storage.setSetting({ key: "house_gdp_forecast", valueJson: value });
+      res.json(value);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/imports/consensus-template.csv", (_req, res) => {
+    res.type("text/csv").send(
+      "symbol,name,market,period,eps,eps_1m_ago,eps_3m_ago,asof\n688981,SMIC,ashare,FY1,,,,\n",
+    );
+  });
+
+  app.post("/api/imports/consensus", async (req, res) => {
+    try {
+      const body = z.object({
+        rows: z.array(z.object({
+          symbol: z.string().min(1).max(20),
+          name: z.string().max(80).optional(),
+          market: z.string().max(12).optional(),
+          period: z.string().max(12),
+          eps: z.number(),
+          eps1mAgo: z.number().nullable().optional(),
+          eps3mAgo: z.number().nullable().optional(),
+          asof: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        })).max(200),
+      }).parse(req.body ?? {});
+      const rows = body.rows.map((r) => {
+        const rev1 = r.eps1mAgo != null && r.eps1mAgo !== 0 ? ((r.eps - r.eps1mAgo) / Math.abs(r.eps1mAgo)) * 100 : null;
+        const rev3 = r.eps3mAgo != null && r.eps3mAgo !== 0 ? ((r.eps - r.eps3mAgo) / Math.abs(r.eps3mAgo)) * 100 : null;
+        return { ...r, revision1mPct: rev1, revision3mPct: rev3 };
+      });
+      const value = { rows, updatedAt: new Date().toISOString(), source: "factset_csv" };
+      await storage.setSetting({ key: "consensus_revisions", valueJson: value });
+      res.json({ ok: true, count: rows.length });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   /** GET /api/equity/risk-dashboard?themes=semi,ev — scored risks + bull/base/bear scenarios (Gap E) */
   app.get("/api/equity/risk-dashboard", async (req, res) => {
     try {

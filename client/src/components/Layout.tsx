@@ -43,6 +43,7 @@ const SECTIONS: NavItem[] = [
   { slug: "/margins", label: "PPI & Margins", icon: Factory, group: "Dashboard" },
   { slug: "/property", label: "Property", icon: Building2, group: "Dashboard" },
   { slug: "/outlook", label: "Outlook", icon: Telescope, group: "Dashboard" },
+  { slug: "/transmission", label: "Transmission", icon: Activity, group: "Dashboard" },
   { slug: "/policy", label: "Policy Tracker", icon: PolicyIcon, group: "Dashboard" },
   { slug: "/sectors", label: "Sector Allocation", icon: SectorsIcon, group: "Dashboard" },
   // ─── Analysis group (Phase 3b) ───

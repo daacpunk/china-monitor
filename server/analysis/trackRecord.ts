@@ -32,7 +32,7 @@ import type { HouseView, Prediction, StrategyNote } from "@shared/schema";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-export const HORIZON_DAYS: Record<string, number> = { "1Q": 90, "2Q": 180, "1Y": 365 };
+export const HORIZON_DAYS: Record<string, number> = { "1Q": 90, "2Q": 180, "1Y": 365, "12M": 365 };
 /** Flat band: |return| <= 2% counts as "flat". */
 const FLAT_BAND = 0.02;
 
@@ -60,7 +60,7 @@ export function stanceToDirection(stance: string): Direction {
 }
 
 export function horizonDays(horizon: string | null | undefined): number {
-  return HORIZON_DAYS[(horizon ?? "2Q").toUpperCase()] ?? 180;
+  return HORIZON_DAYS[(horizon ?? "1Q").toUpperCase()] ?? 90;
 }
 
 export function resolveAtFor(createdAt: Date, horizon: string | null | undefined): Date {
@@ -156,7 +156,7 @@ export async function capturePredictionsForHouseView(
   model?: string | null,
 ): Promise<number> {
   const now = new Date();
-  const horizon = (hv.horizon ?? "2Q").toUpperCase();
+  const horizon = (hv.horizon ?? "1Q").toUpperCase();
   const resolveAt = resolveAtFor(now, horizon);
   const anchorIdx = await currentLevel("CSI300").catch(() => null);
   let created = 0;
@@ -242,7 +242,7 @@ export async function capturePredictionForNote(
   const verdict: any = note.thesisVerdict;
   if (!verdict) return 0;
   const now = new Date();
-  const horizon = (opts?.horizon ?? "2Q").toUpperCase();
+  const horizon = (opts?.horizon ?? "1Q").toUpperCase();
   const hvSnap: any = note.houseViewSnapshot ?? null;
   const impliedFromHv = hvSnap?.stance ? stanceToDirection(String(hvSnap.stance)) : null;
   const impliedFromVerdict = VERDICT_DIRECTION[String(verdict.verdict ?? "")] ?? null;

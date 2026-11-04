@@ -8,6 +8,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Link } from "wouter";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -25,6 +26,23 @@ import { RelativeContextPanel } from "@/components/RelativeContextPanel";
 import { ExternalLink, ArrowRight } from "lucide-react";
 
 // ─── LiveStatCard ─────────────────────────────────────────────────────────────
+
+function CeicStaleBanner() {
+  const q = useQuery<{ staleSeries?: unknown[]; latestObservationDate?: string | null; summary?: string }>({
+    queryKey: ["/api/ceic/status"],
+    queryFn: async () => (await apiRequest("GET", "/api/ceic/status")).json(),
+  });
+  const n = q.data?.staleSeries?.length ?? 0;
+  if (!n) return null;
+  return (
+    <Card className="mb-6 border-amber-500/40 bg-amber-500/5 p-4">
+      <h2 className="text-sm font-semibold">CEIC book is stale</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {n} mapped series are past their freshness window. Latest observation {q.data?.latestObservationDate ?? "unknown"}. China Monitor cannot pull CEIC from Railway. Refresh from your Mac with the local collector, or upload a new CDM Excel file under Imports.
+      </p>
+    </Card>
+  );
+}
 
 function LiveStatCard({
   label,
@@ -269,6 +287,8 @@ export default function Overview() {
           <RefreshButton onRefresh={handleGlobalRefresh} label="Refresh data" />
         }
       />
+
+      <CeicStaleBanner />
 
       {/* ── Regime watch (anomaly banner) ──────────────────────────────────── */}
       {topAnomalies.length > 0 && (

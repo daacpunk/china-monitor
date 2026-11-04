@@ -64,12 +64,30 @@ async function macroDigest(): Promise<{ text: string; inputs: BriefInputs }> {
   const eq = inputs.equities
     .map((e: any) => `  - ${e.label ?? e.id}: ${fmt(e.latest, 0)} (${e.chgPct != null ? fmt(e.chgPct) + "%" : "n/a"}) [${e.provenance ?? "?"}]`)
     .join("\n");
+  let transmission = "";
+  try {
+    const { buildTransmission } = await import("../analysis/transmission");
+    transmission = `\n${(await buildTransmission()).digest}`;
+  } catch {
+    transmission = "";
+  }
   const text =
     `As of ${inputs.asOfDate}. Breadth: ${inputs.breadth.up} up / ${inputs.breadth.down} down / ${inputs.breadth.flat} flat (${inputs.breadth.tilt}).\n` +
     `MACRO DRIVERS:\n${drivers || "  (none)"}\n` +
     `CROSS-ASSET:\n${cross || "  (none)"}\n` +
-    `EQUITY INDICES:\n${eq || "  (none)"}`;
-  return { text, inputs };
+    `EQUITY INDICES:\n${eq || "  (none)"}` +
+    transmission;
+  let house = "";
+  try {
+    const row = await storage.getSetting("house_gdp_forecast");
+    const v = row?.valueJson as { rows?: { year: number; gdpYoy: number }[]; note?: string } | undefined;
+    if (v?.rows?.length) {
+      house = `\nHOUSE GDP PATH (entered by the user, not a live sell-side consensus): ${v.rows.map((r) => `${r.year} ${r.gdpYoy}%`).join(", ")}. ${v.note ?? ""}`;
+    }
+  } catch {
+    house = "";
+  }
+  return { text: text + house, inputs };
 }
 
 async function policyDigest(emphasis: CoverageTheme[]): Promise<{ text: string; citations: { name: string; url: string }[] }> {
@@ -244,7 +262,19 @@ async function sectorDigest(
   } catch {
     /* skip relative context on failure */
   }
-  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock + relativeBlock;
+  let consensusBlock = "";
+  try {
+    const row = await storage.getSetting("consensus_revisions");
+    const v = row?.valueJson as { rows?: { symbol: string; name?: string; period: string; revision1mPct: number | null; revision3mPct: number | null }[]; updatedAt?: string } | undefined;
+    const rows = v?.rows ?? [];
+    if (rows.length) {
+      const lines = rows.slice(0, 12).map((r) => `  - ${r.name ?? r.symbol} [${r.symbol}] ${r.period}: 1m ${r.revision1mPct == null ? "n/a" : r.revision1mPct.toFixed(1) + "%"} / 3m ${r.revision3mPct == null ? "n/a" : r.revision3mPct.toFixed(1) + "%"}`);
+      consensusBlock = `\nCONSENSUS REVISIONS (FactSet CSV import, not Wind; as of ${v?.updatedAt ?? "n/a"}):\n${lines.join("\n")}`;
+    }
+  } catch {
+    consensusBlock = "";
+  }
+  return `SECTOR UNIVERSE (emphasized):\n${blocks.join("\n")}` + valBlock + fundBlock + riskBlock + flowsBlock + transmissionBlock + relativeBlock + consensusBlock;
 }
 
 /**
