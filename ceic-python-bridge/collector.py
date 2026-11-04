@@ -188,18 +188,16 @@ class CeicClient:
                 fn = getattr(self.series_api, name, None)
                 if callable(fn):
                     candidates.append((f"SeriesApi.{name}", fn))
+        # Pass the series id once. Ceic.series(series_id, **kwargs) and
+        # SeriesApi.get_series_time_points(id, **kwargs) both reject a second
+        # series_id=/id= keyword. start_date is omitted when unset so a full
+        # history pull is not filtered to null.
+        extra: dict[str, Any] = {"count": count}
+        if start_date:
+            extra["start_date"] = start_date
         for label, fn in candidates:
             try:
-                res = call_with_supported_kwargs(
-                    fn,
-                    series_id,
-                    id=series_id,
-                    series_id=series_id,
-                    start_date=start_date,
-                    startDate=start_date,
-                    count=count,
-                    limit=count,
-                )
+                res = call_with_supported_kwargs(fn, series_id, **extra)
                 pts = extract_points(res)
                 if pts:
                     return pts
@@ -220,15 +218,22 @@ def extract_points(res: Any) -> list[dict[str, Any]]:
         data = getattr(res, "data", None)
         if data is None and isinstance(res, dict):
             data = res.get("data")
-        if isinstance(data, list) and data:
-            first = data[0]
-            container = (
-                getattr(first, "time_points", None)
-                or getattr(first, "timePoints", None)
-                or (first.get("timePoints") or first.get("time_points") if isinstance(first, dict) else None)
+        items = data if isinstance(data, list) else ([data] if data is not None else [])
+        if not items and not isinstance(res, (str, bytes, dict)):
+            try:
+                items = list(res)
+            except TypeError:
+                items = []
+        merged: list[Any] = []
+        for item in items:
+            pts = (
+                getattr(item, "time_points", None)
+                or getattr(item, "timePoints", None)
+                or (item.get("timePoints") or item.get("time_points") if isinstance(item, dict) else None)
             )
-        elif data is not None:
-            container = getattr(data, "time_points", None) or getattr(data, "timePoints", None)
+            if pts:
+                merged.extend(list(pts))
+        container = merged or None
     if not container:
         return []
     out: list[dict[str, Any]] = []
