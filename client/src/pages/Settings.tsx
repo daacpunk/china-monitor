@@ -61,6 +61,15 @@ function ModelsCard() {
     onError: (e: any) => toast({ title: "Could not set default", description: e.message, variant: "destructive" }),
   });
 
+  const policyMutation = useMutation({
+    mutationFn: async (policy: string) => (await apiRequest("POST", "/api/llm/policy", { policy })).json(),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/llm/models"] });
+      toast({ title: "Default policy updated", description: data?.promotion ? `default → ${data.promotion.to}` : data?.policy });
+    },
+    onError: (e: any) => toast({ title: "Could not set policy", description: e.message, variant: "destructive" }),
+  });
+
   const models = catalog.models;
   const current = models.find((m) => m.id === catalog.defaultModel);
   const registered = models.filter((m) => m.source === "registered");
@@ -78,8 +87,8 @@ function ModelsCard() {
             <h3 className="text-sm font-semibold">Models</h3>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Report synthesis default + live catalog. New Anthropic Sonnet/Opus/Haiku releases are
-            auto-registered; the report default is auto-promoted within the Sonnet family only.
+            Report synthesis default + live catalog. New Anthropic and OpenRouter releases are
+            registered daily. Under a follow-latest policy the report default moves to the newest model.
           </p>
         </div>
         <Button
@@ -120,7 +129,22 @@ function ModelsCard() {
             </div>
           )}
         </div>
-        <div className="text-xs">
+        <div>
+          <Label className="text-xs uppercase text-muted-foreground">Default policy</Label>
+          <select
+            className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            value={catalog.data?.policy ?? "latest_anthropic"}
+            onChange={(e) => policyMutation.mutate(e.target.value)}
+            disabled={policyMutation.isPending || catalog.isLoading}
+            data-testid="select-default-policy"
+          >
+            <option value="latest_anthropic">Follow newest Claude (Fable, Opus, Sonnet)</option>
+            <option value="latest_openai">Follow newest OpenAI via OpenRouter</option>
+            <option value="pinned">Pinned: use the model I picked</option>
+          </select>
+          <div className="mt-1 text-[11px] text-muted-foreground">Picking a model by hand pins it.</div>
+        </div>
+        <div className="text-xs sm:col-span-2">
           <Label className="text-xs uppercase text-muted-foreground">Catalog status</Label>
           <div className="mt-1 space-y-0.5 text-muted-foreground">
             <div>

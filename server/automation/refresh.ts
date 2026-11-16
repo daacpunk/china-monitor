@@ -8,6 +8,7 @@
  * source fetch still respects the cost ceiling).
  */
 
+import { getCheapModelSync } from "../analysis/modelCatalog";
 import { fetchSeries } from "../series/fetchSeries";
 import { DEFAULT_BRIEF_DRIVERS, DEFAULT_CROSS_ASSET, DEFAULT_BRIEF_EQUITIES } from "../analysis/brief";
 import { scanChannels } from "../policy/service";
@@ -63,7 +64,7 @@ export async function refreshReportSeries(opts: {
       const channelIds = emphasized.length > 0
         ? TECH_CHANNEL_IDS
         : POLICY_CHANNELS.filter((c) => c.tier <= 4).map((c) => c.id);
-      const reports = await scanChannels(channelIds, 30, "claude-haiku-4");
+      const reports = await scanChannels(channelIds, 30, getCheapModelSync());
       policyInserted = reports.reduce((s, r) => s + (r.inserted || 0), 0);
     } catch (err: any) {
       errors.push(`policy: ${err.message}`);

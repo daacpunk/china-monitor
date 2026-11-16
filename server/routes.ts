@@ -15,7 +15,7 @@ import { listRegistry } from "./series/registry";
 import { searchSeries } from "./clients/ceic";
 import { getUpcomingReleases, getAllReleases } from "./clients/calendar";
 import { resolveApiKey } from "./keyResolver";
-import { llmModelSchema, getDefaultReportModel, DEFAULT_CHEAP_MODEL, primeModelCatalog } from "./analysis/modelCatalog";
+import { llmModelSchema, getDefaultReportModel, getCheapModelSync, primeModelCatalog } from "./analysis/modelCatalog";
 import { registerLlmCatalogRoutes } from "./analysis/modelRoutes";
 import { POLICY_CHANNELS, COVERAGE_THEMES, TECH_CHANNEL_IDS } from "./policy/channels";
 import { scanChannels, EQUITY_TARGETS } from "./policy/service";
@@ -1474,7 +1474,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         else if (lens === "macro") ids = POLICY_CHANNELS.filter((c) => c.tier <= 4).map((c) => c.id);
         else ids = POLICY_CHANNELS.map((c) => c.id);
       }
-      const reports = await scanChannels(ids, sinceDays ?? 30, classifyModel ?? DEFAULT_CHEAP_MODEL);
+      const reports = await scanChannels(ids, sinceDays ?? 30, classifyModel ?? getCheapModelSync());
       res.json({ reports });
     } catch (err: any) {
       res.status(400).json({ error: err.message });

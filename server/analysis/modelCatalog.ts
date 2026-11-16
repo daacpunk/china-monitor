@@ -38,6 +38,8 @@ export interface ModelEntry {
   source?: "seed" | "registered";
   registeredAt?: string;
   note?: string;
+  /** Provider release time (unix seconds) when known. */
+  createdAt?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,9 +96,9 @@ export const SEED_MODELS: ModelEntry[] = [
     provider: "anthropic",
     apiModel: "claude-haiku-4-5",
     family: "haiku",
-    tier: "cheap",
-    inputPerMTok: 0.8,
-    outputPerMTok: 4.0,
+    tier: "legacy",
+    inputPerMTok: 1.0,
+    outputPerMTok: 5.0,
     selectable: true,
     source: "seed",
   },
@@ -410,6 +412,90 @@ export async function setDefaultReportModel(model: string): Promise<string> {
   await storage.setSetting({ key: SETTINGS_KEY_DEFAULT_MODEL, valueJson: { model } as any });
   defaultModelCache = model;
   return model;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Default policy — "always use the newest model"
+//   latest_anthropic  newest Anthropic flagship (fable > opus > sonnet > haiku, then version)
+//   latest_openai     newest OpenAI model routed through OpenRouter
+//   pinned            never auto-change; the operator picked a model by hand
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type DefaultPolicy = "latest_anthropic" | "latest_openai" | "pinned";
+export const SETTINGS_KEY_DEFAULT_POLICY = "llm_default_policy";
+export const DEFAULT_POLICY: DefaultPolicy = "latest_anthropic";
+let policyCache: DefaultPolicy = DEFAULT_POLICY;
+
+function asPolicy(v: unknown): DefaultPolicy | undefined {
+  return v === "latest_anthropic" || v === "latest_openai" || v === "pinned" ? v : undefined;
+}
+
+export async function getDefaultPolicy(): Promise<DefaultPolicy> {
+  try {
+    const row = await storage.getSetting(SETTINGS_KEY_DEFAULT_POLICY);
+    const val: any = row?.valueJson;
+    const p = asPolicy(val?.policy ?? val);
+    if (p) policyCache = p;
+  } catch {
+    /* keep cache */
+  }
+  return policyCache;
+}
+
+export async function setDefaultPolicy(policy: DefaultPolicy): Promise<DefaultPolicy> {
+  await storage.setSetting({ key: SETTINGS_KEY_DEFAULT_POLICY, valueJson: { policy } as any });
+  policyCache = policy;
+  return policy;
+}
+
+const FAMILY_RANK: Record<string, number> = { fable: 4, opus: 3, sonnet: 2, haiku: 1 };
+
+/** Newest Anthropic model: biggest family first, then version. Legacy-tier ids are skipped. */
+export function pickLatestAnthropic(models: ModelEntry[], liveApiModels?: Set<string>): ModelEntry | undefined {
+  const pool = models.filter(
+    (m) =>
+      m.provider === "anthropic" &&
+      m.selectable &&
+      m.tier !== "legacy" &&
+      FAMILY_RANK[m.family] &&
+      parseAnthropicVersion(m.apiModel) &&
+      (!liveApiModels || liveApiModels.size === 0 || liveApiModels.has(m.apiModel)),
+  );
+  let best: ModelEntry | undefined;
+  for (const m of pool) {
+    if (!best) { best = m; continue; }
+    const c = compareModelVersions(m.apiModel, best.apiModel);
+    const rm = FAMILY_RANK[m.family], rb = FAMILY_RANK[best.family];
+    // Fable 5.2 outranks Opus 5.5: family rank wins, version breaks ties.
+    if (rm !== rb ? rm > rb : c > 0) best = m;
+  }
+  return best;
+}
+
+/** "openai/gpt-6.1-sol" -> 6.1 ; -1 when it is not a GPT slug. */
+export function openAiVersion(apiModel: string): number {
+  const m = /^openai\/gpt-(\d+(?:\.\d+)?)/i.exec(apiModel);
+  return m ? Number(m[1]) : -1;
+}
+
+/** Newest OpenAI generation on OpenRouter; within it, the most capable (highest output price). */
+export function pickLatestOpenAi(models: ModelEntry[]): ModelEntry | undefined {
+  const pool = models.filter((m) => m.provider === "openrouter" && m.selectable && openAiVersion(m.apiModel) > 0);
+  let best: ModelEntry | undefined;
+  for (const m of pool) {
+    if (!best) { best = m; continue; }
+    const vm = openAiVersion(m.apiModel), vb = openAiVersion(best.apiModel);
+    if (vm !== vb ? vm > vb : m.outputPerMTok > best.outputPerMTok) best = m;
+  }
+  return best;
+}
+
+/** Newest Haiku for cheap classification calls. Falls back to the compile-time id. */
+export function getCheapModelSync(): string {
+  const haikus = listSelectableModels().filter((m) => m.provider === "anthropic" && m.family === "haiku" && m.tier !== "legacy");
+  let best: ModelEntry | undefined;
+  for (const m of haikus) if (!best || compareModelVersions(m.apiModel, best.apiModel) > 0) best = m;
+  return best?.id ?? DEFAULT_CHEAP_MODEL;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

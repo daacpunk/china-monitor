@@ -31,6 +31,7 @@ export interface DetectedModel {
 
 export interface LlmCatalog {
   defaultModel: string;
+  policy?: "latest_anthropic" | "latest_openai" | "pinned";
   seedDefaultModel: string;
   models: CatalogModel[];
   detected: DetectedModel[];

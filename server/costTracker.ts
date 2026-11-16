@@ -87,7 +87,7 @@ export const PRICING = {
   "claude-sonnet-4": { inputPerMTok: 3.0, outputPerMTok: 15.0 },
   "claude-opus-5": { inputPerMTok: 5.0, outputPerMTok: 25.0 },
   "claude-opus-4": { inputPerMTok: 15.0, outputPerMTok: 75.0 },
-  "claude-haiku-4": { inputPerMTok: 0.8, outputPerMTok: 4.0 },
+  "claude-haiku-4": { inputPerMTok: 1.0, outputPerMTok: 5.0 },
   // Perplexity Agent API preset "low" (ex-sonar-pro). Prefer billed usage.cost.total_cost
   // when present; this estimate is the fallback. Search tool calls are extra (~$0.0025).
   "sonar-pro": { perRequest: 0.005, inputPerMTok: 3.0, outputPerMTok: 15.0 },

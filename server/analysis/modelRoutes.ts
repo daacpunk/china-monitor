@@ -13,8 +13,10 @@ import { z } from "zod";
 import {
   DEFAULT_REPORT_MODEL,
   getCatalogStateSync,
+  getDefaultPolicy,
   getDefaultReportModel,
   listSelectableModels,
+  setDefaultPolicy,
   loadCatalogState,
   selectableLlmModelSchema,
   setDefaultReportModel,
@@ -22,10 +24,11 @@ import {
 import { refreshModelCatalog } from "./modelCatalogRefresh";
 
 async function catalogPayload() {
-  const [defaultModel] = await Promise.all([getDefaultReportModel(), loadCatalogState()]);
+  const [defaultModel, policy] = await Promise.all([getDefaultReportModel(), getDefaultPolicy(), loadCatalogState()]);
   const state = getCatalogStateSync();
   return {
     defaultModel,
+    policy,
     seedDefaultModel: DEFAULT_REPORT_MODEL,
     models: listSelectableModels().map((m) => ({
       id: m.id,
@@ -63,7 +66,23 @@ export function registerLlmCatalogRoutes(app: Express): void {
       await loadCatalogState(true); // pick up models registered since boot
       const { model } = z.object({ model: selectableLlmModelSchema }).parse(req.body ?? {});
       await setDefaultReportModel(model);
+      // Choosing a model by hand pins it, so the next refresh does not override it.
+      await setDefaultPolicy("pinned");
       res.json(await catalogPayload());
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/llm/policy { policy } — follow the newest model, or pin. Applies immediately. */
+  app.post("/api/llm/policy", async (req, res) => {
+    try {
+      const { policy } = z
+        .object({ policy: z.enum(["latest_anthropic", "latest_openai", "pinned"]) })
+        .parse(req.body ?? {});
+      await setDefaultPolicy(policy);
+      const result = policy === "pinned" ? undefined : await refreshModelCatalog({ trigger: "manual" });
+      res.json({ ok: true, promotion: result?.promotion ?? null, ...(await catalogPayload()) });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
