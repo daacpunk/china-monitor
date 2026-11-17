@@ -32,6 +32,7 @@ export function registerAutomationRoutes(app: Express): void {
         emphasis: z.array(z.string()).optional(),
         featuredNames: z.array(z.string()).optional(),
         model: z.string().optional(),
+        modelPinned: z.boolean().optional(),
         refreshPolicyFirst: z.boolean().optional(),
         autoUpdateHouseView: z.boolean().optional(),
         notify: z.object({ inApp: z.boolean(), email: z.string().email().optional().or(z.literal("")) }).optional(),

@@ -88,6 +88,8 @@ export async function saveConfig(patch: Partial<AutomationConfig>): Promise<Auto
   const next: AutomationConfig = { ...current, ...patch };
   // An explicit model choice pins the config; clearing it re-enables tracking.
   if (patch.model !== undefined) next.modelPinned = true;
+  // An explicit modelPinned flag wins, so the schedule can go back to following the default.
+  if (patch.modelPinned !== undefined) next.modelPinned = patch.modelPinned;
   // Recompute nextRunAt whenever schedule-affecting fields change or on enable.
   next.nextRunAt = computeNextRun(next, new Date()).toISOString();
   await storage.setSetting({ key: SETTINGS_KEY, valueJson: next as any });
