@@ -407,10 +407,23 @@ export async function assembleContext(opts: {
   };
 }
 
+/** A standing house view older than this is shown to the model as stale. */
+const HOUSE_VIEW_STALE_DAYS = 45;
+
 /** Render the full context into one prompt block for the synthesis calls. */
 export function contextToPrompt(ctx: ReportContext): string {
+  const hvAgeDays = ctx.houseView?.updatedAt
+    ? Math.floor((Date.now() - new Date(ctx.houseView.updatedAt as any).getTime()) / 86_400_000)
+    : null;
+  const hvStale = hvAgeDays != null && hvAgeDays > HOUSE_VIEW_STALE_DAYS;
   const hv = ctx.houseView
-    ? `CURRENT HOUSE VIEW: ${ctx.houseView.headline} (stance ${ctx.houseView.stance}, conviction ${ctx.houseView.conviction}, horizon ${ctx.houseView.horizon}).\n` +
+    ? (hvStale
+        ? `STANDING HOUSE VIEW — STALE: last updated ${String(ctx.houseView.updatedAt).slice(0, 10)} (${hvAgeDays} days ago). ` +
+          `Its headline and pillars were written for events that have since passed. Do NOT lead with it, quote its ` +
+          `event references as current, or treat it as the desk's present call. Form the view from the evidence above; ` +
+          `mention in one clause that the standing view needs refreshing, then move on.\n`
+        : `CURRENT HOUSE VIEW${hvAgeDays != null ? ` (updated ${hvAgeDays} days ago)` : ""}: `) +
+      `${ctx.houseView.headline} (stance ${ctx.houseView.stance}, conviction ${ctx.houseView.conviction}, horizon ${ctx.houseView.horizon}).\n` +
       `Pillars: ${(ctx.houseView.pillars as string[]).join("; ")}\n` +
       `Sector stances: ${(ctx.houseView.sectorStance as any[]).map((s) => `${s.theme}:${s.stance}`).join(", ")}`
     : "CURRENT HOUSE VIEW: (none set yet)";

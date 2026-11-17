@@ -107,7 +107,10 @@ function baseSystem(mode: ComposerMode, model: LlmModel): string {
     "You are a senior China/HK equity & macro strategist writing an institutional-grade " +
     "research note. Write in a precise, evidence-led voice. Reason ONLY from the supplied " +
     "EVIDENCE BASE plus general framework knowledge; never invent data points, headlines, " +
-    "or prices. When you state a fact from the evidence, keep it faithful. Use clear prose " +
+    "or prices. When you state a fact from the evidence, keep it faithful. Lead with the " +
+    "newest evidence and the next dated catalysts. Do not anchor on an event more than ~60 days " +
+    "old (a past Politburo meeting, an old policy print) unless the evidence shows it still " +
+    "drives current conditions, and say so when it does. Use clear prose " +
     "(markdown allowed: short paragraphs, occasional bullets). Do not fabricate citations.";
   if (mode === "thesis_driven") {
     return (
