@@ -103,13 +103,22 @@ async function setCached(key: string, value: CommentaryResult, ttlSeconds: numbe
 
 // ─── Provider implementations ─────────────────────────────────────────
 
-async function callAnthropic(
+interface AnthropicAttempt {
+  text: string;
+  tokensIn: number;
+  tokensOut: number;
+  stopReason: string;
+  blockTypes: string[];
+}
+
+async function anthropicOnce(
   apiKey: string,
   apiModel: string,
   system: string,
   user: string,
-  maxOutputTokens: number,
-): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+  maxTokens: number,
+  thinkingOff: boolean,
+): Promise<AnthropicAttempt> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -119,9 +128,12 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model: apiModel,
-      max_tokens: maxOutputTokens,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }],
+      // Newer flagship models can spend the whole token budget on hidden
+      // reasoning and return no text. Short report sections need the text.
+      ...(thinkingOff ? { thinking: { type: "disabled" } } : {}),
     }),
   });
   if (!res.ok) {
@@ -129,13 +141,59 @@ async function callAnthropic(
     throw new Error(`Anthropic HTTP ${res.status}: ${body.slice(0, 400)}`);
   }
   const json: any = await res.json();
-  const text = (json.content || []).map((b: any) => b.text || "").join("");
+  const blocks: any[] = Array.isArray(json.content) ? json.content : [];
+  // Only text blocks count. Thinking blocks carry no `text` and must not be joined in.
+  const text = blocks.filter((b) => b?.type === "text").map((b) => b.text || "").join("");
   const usage = json.usage || {};
   return {
     text,
     tokensIn: usage.input_tokens || 0,
     tokensOut: usage.output_tokens || 0,
+    stopReason: String(json.stop_reason ?? ""),
+    blockTypes: blocks.map((b) => String(b?.type ?? "?")),
   };
+}
+
+async function callAnthropic(
+  apiKey: string,
+  apiModel: string,
+  system: string,
+  user: string,
+  maxOutputTokens: number,
+): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+  const isFable = /^claude-fable-/.test(apiModel);
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let thinkingOff = isFable;
+  let first: AnthropicAttempt | undefined;
+  try {
+    first = await anthropicOnce(apiKey, apiModel, system, user, maxOutputTokens, thinkingOff);
+  } catch (err: any) {
+    // The model rejected the thinking switch: retry once without it.
+    if (thinkingOff && /HTTP 400/.test(err?.message ?? "") && /thinking/i.test(err?.message ?? "")) {
+      thinkingOff = false;
+      first = await anthropicOnce(apiKey, apiModel, system, user, maxOutputTokens, false);
+    } else {
+      throw err;
+    }
+  }
+  tokensIn += first.tokensIn;
+  tokensOut += first.tokensOut;
+  if (first.text.trim()) return { text: first.text, tokensIn, tokensOut };
+
+  // Empty text: usually the budget went to reasoning. Retry once with more room.
+  const bigger = Math.min(16000, Math.max(maxOutputTokens * 4, 4000));
+  const second = await anthropicOnce(apiKey, apiModel, system, user, bigger, true).catch(() =>
+    anthropicOnce(apiKey, apiModel, system, user, bigger, false),
+  );
+  tokensIn += second.tokensIn;
+  tokensOut += second.tokensOut;
+  if (second.text.trim()) return { text: second.text, tokensIn, tokensOut };
+  throw new Error(
+    `${apiModel} returned no text (stop_reason=${second.stopReason || first.stopReason}, ` +
+      `blocks=${(second.blockTypes.length ? second.blockTypes : first.blockTypes).join(",") || "none"}, ` +
+      `max_tokens=${bigger}).`,
+  );
 }
 
 async function callDeepseek(
@@ -228,7 +286,7 @@ export async function generateCommentary(req: CommentaryRequest): Promise<Commen
 
   // 1. Cache check
   const cached = await getCached(cacheKey);
-  if (cached) return cached;
+  if (cached && String((cached as any).text ?? "").trim()) return cached;
 
   // 2. Ceiling check
   const ceiling = await checkCeiling(meta.service);
@@ -272,6 +330,7 @@ export async function generateCommentary(req: CommentaryRequest): Promise<Commen
     } else {
       result = await callDeepseek(apiKey, meta.apiModel, req.systemPrompt, req.userPrompt, maxOut);
     }
+    if (!result.text.trim()) throw new Error(`${meta.apiModel} returned an empty response.`);
   } catch (err: any) {
     await recordCall({
       service: meta.service,
@@ -312,6 +371,6 @@ export async function generateCommentary(req: CommentaryRequest): Promise<Commen
   };
 
   // 5. Cache (don't await — fire and forget)
-  void setCached(cacheKey, out, ttl);
+  if (out.text.trim()) void setCached(cacheKey, out, ttl);
   return out;
 }
