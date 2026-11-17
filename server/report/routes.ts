@@ -7,7 +7,7 @@ import type { Express } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { generateStrategyNote, regenerateSection, type GenerateOpts } from "./strategyNote";
-import { proposeHouseView } from "./houseView";
+import { proposeHouseView, readPendingHouseView, savePendingHouseView, clearPendingHouseView } from "./houseView";
 import { llmModelSchema } from "../analysis/modelCatalog";
 import {
   capturePredictionsForHouseView,
@@ -23,7 +23,7 @@ export function registerReportRoutes(app: Express): void {
   app.get("/api/house-view", async (_req, res) => {
     try {
       const hv = await storage.getHouseView();
-      res.json({ houseView: hv ?? null });
+      res.json({ houseView: hv ?? null, pending: await readPendingHouseView() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -68,9 +68,20 @@ export function registerReportRoutes(app: Express): void {
       } catch (e) {
         console.error("[house-view] prediction capture failed (non-fatal)", e);
       }
+      await clearPendingHouseView();
       res.json({ houseView: hv });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  /** DELETE /api/house-view/pending — discard a drafted proposal. */
+  app.delete("/api/house-view/pending", async (_req, res) => {
+    try {
+      await clearPendingHouseView();
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -78,7 +89,9 @@ export function registerReportRoutes(app: Express): void {
     try {
       const { model } = z.object({ model: MODEL_ENUM.optional() }).parse(req.body ?? {});
       const proposal = await proposeHouseView(model);
-      res.json({ proposal });
+      // Keep the draft so it survives a page reload until it is approved or discarded.
+      const pending = await savePendingHouseView(proposal, "manual");
+      res.json({ proposal, pending });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

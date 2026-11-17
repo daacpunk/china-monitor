@@ -11,6 +11,36 @@ import { generateCommentary, type LlmModel } from "../analysis/llm";
 import { getDefaultReportModel } from "../analysis/modelCatalog";
 import { assembleContext, contextToPrompt } from "./context";
 import { SECTOR_UNIVERSE } from "../equity/universe";
+import { storage } from "../storage";
+
+const PENDING_KEY = "house_view_pending";
+
+export interface PendingHouseView {
+  proposal: ProposedHouseView;
+  createdAt: string;
+  source: string;
+}
+
+/** The latest drafted proposal awaiting approval (null when none). */
+export async function readPendingHouseView(): Promise<PendingHouseView | null> {
+  try {
+    const row = await storage.getSetting(PENDING_KEY);
+    const v: any = row?.valueJson;
+    return v && v.proposal ? (v as PendingHouseView) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePendingHouseView(proposal: ProposedHouseView, source: string): Promise<PendingHouseView> {
+  const pending: PendingHouseView = { proposal, createdAt: new Date().toISOString(), source };
+  await storage.setSetting({ key: PENDING_KEY, valueJson: pending as any });
+  return pending;
+}
+
+export async function clearPendingHouseView(): Promise<void> {
+  await storage.setSetting({ key: PENDING_KEY, valueJson: { cleared: new Date().toISOString() } as any });
+}
 
 export interface ProposedHouseView {
   headline: string;

@@ -15,7 +15,7 @@
 
 import { storage } from "../storage";
 import { generateStrategyNote } from "../report/strategyNote";
-import { proposeHouseView } from "../report/houseView";
+import { proposeHouseView, savePendingHouseView, clearPendingHouseView } from "../report/houseView";
 import { refreshReportSeries } from "./refresh";
 import { notify } from "./notify";
 import { DEFAULT_REPORT_MODEL, getDefaultReportModel } from "../analysis/modelCatalog";
@@ -149,10 +149,12 @@ export async function runScheduledReport(kind: "scheduled" | "manual"): Promise<
         // Track record: log the auto-applied view as predictions (best-effort).
         try { await capturePredictionsForHouseView(savedHv, cfg.model); }
         catch (e) { console.error("[scheduler] prediction capture failed (non-fatal)", e); }
+        await clearPendingHouseView().catch(() => undefined);
         t("house_view", s, true, "auto-applied");
       } else {
-        // Propose-only: stash the proposal as a notification for review.
-        await notify({ title: "House-view update proposed", body: proposal.headline, kind: "info", link: "/#/report" });
+        // Propose-only: keep the draft for approval on the Report page, and tell the user.
+        await savePendingHouseView(proposal, `scheduled (${kind})`);
+        await notify({ title: "House-view update ready for review", body: `${proposal.headline} Open Strategy Report to approve, edit or discard.`, kind: "info", link: "/#/report" });
         t("house_view", s, true, "proposed (review)");
       }
     } catch (err: any) {

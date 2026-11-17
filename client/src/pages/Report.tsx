@@ -18,6 +18,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ReportVault } from "@/components/ReportVault";
+import { HouseViewPanel } from "@/components/HouseViewPanel";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -310,6 +311,8 @@ export default function Report() {
         title="Strategy Report"
         subtitle="Generate an institutional strategy paper. Data-Driven: the AI builds a strategy + model portfolio from the evidence. Thesis-Driven: it stress-tests your thesis as a critic, backed by data + Sonar Pro."
       />
+
+      <HouseViewPanel />
 
       {/* Composer */}
       <Card className="mb-5 p-5">
