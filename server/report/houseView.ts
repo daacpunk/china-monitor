@@ -70,7 +70,7 @@ export async function proposeHouseView(modelArg?: LlmModel): Promise<ProposedHou
   const user =
     `${block}\n\n` +
     `Propose the house view as STRICT JSON: {"headline":string,"stance":"bullish"|"neutral"|"bearish"|"constructive"|"cautious","conviction":"low"|"medium"|"high","horizon":"1Q"|"2Q"|"1Y","pillars":[string],"keyRisks":[string],"sectorStance":[{"theme":one of ${themes},"stance":"overweight"|"neutral"|"underweight","rationale":string}],"changeSummary":string}. ` +
-    `Cover all themes in sectorStance. changeSummary = what changed vs the prior view (or "initial view").`;
+    `Keep pillars to 4-5 items and keyRisks to 4-5 items, each one sentence of at most 30 words. Headline at most 25 words. Cover all themes in sectorStance. changeSummary = what changed vs the prior view (or "initial view").`;
 
   const res = await generateCommentary({
     model,
