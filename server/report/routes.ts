@@ -18,12 +18,15 @@ import {
 /** Runtime known-model check (accepts dynamically registered models). */
 const MODEL_ENUM = llmModelSchema;
 
+interface ProposeState { running: boolean; startedAt: number; finishedAt?: number; error?: string }
+let proposeState: ProposeState = { running: false, startedAt: 0 };
+
 export function registerReportRoutes(app: Express): void {
   // ── House view ──────────────────────────────────────────────────────────────
   app.get("/api/house-view", async (_req, res) => {
     try {
       const hv = await storage.getHouseView();
-      res.json({ houseView: hv ?? null, pending: await readPendingHouseView() });
+      res.json({ houseView: hv ?? null, pending: await readPendingHouseView(), proposing: proposeState });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -85,13 +88,28 @@ export function registerReportRoutes(app: Express): void {
     }
   });
 
+  /**
+   * POST /api/house-view/propose — drafts in the background (evidence assembly plus
+   * the model call can exceed the ~300s gateway limit). The UI polls GET /api/house-view,
+   * which reports `proposing` and, when done, the stored `pending` draft.
+   */
   app.post("/api/house-view/propose", async (req, res) => {
     try {
       const { model } = z.object({ model: MODEL_ENUM.optional() }).parse(req.body ?? {});
-      const proposal = await proposeHouseView(model);
-      // Keep the draft so it survives a page reload until it is approved or discarded.
-      const pending = await savePendingHouseView(proposal, "manual");
-      res.json({ proposal, pending });
+      if (proposeState.running && Date.now() - proposeState.startedAt < 10 * 60_000) {
+        return res.status(202).json({ started: false, proposing: proposeState });
+      }
+      proposeState = { running: true, startedAt: Date.now() };
+      void (async () => {
+        try {
+          const proposal = await proposeHouseView(model);
+          await savePendingHouseView(proposal, "manual");
+          proposeState = { running: false, startedAt: proposeState.startedAt, finishedAt: Date.now() };
+        } catch (err: any) {
+          proposeState = { running: false, startedAt: proposeState.startedAt, finishedAt: Date.now(), error: String(err?.message ?? err) };
+        }
+      })();
+      res.status(202).json({ started: true, proposing: proposeState });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

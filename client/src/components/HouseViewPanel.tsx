@@ -26,6 +26,7 @@ interface Proposal extends HouseViewData { changeSummary?: string }
 interface Payload {
   houseView: HouseViewData | null;
   pending: { proposal: Proposal; createdAt: string; source: string } | null;
+  proposing?: { running: boolean; startedAt: number; finishedAt?: number; error?: string };
 }
 
 const STANCES = ["bullish", "constructive", "neutral", "cautious", "bearish"];
@@ -48,7 +49,11 @@ export function HouseViewPanel() {
   const q = useQuery<Payload>({
     queryKey: ["/api/house-view"],
     queryFn: async () => (await apiRequest("GET", "/api/house-view")).json(),
+    // Poll while a draft is being written in the background.
+    refetchInterval: (query) => ((query.state.data as Payload | undefined)?.proposing?.running ? 4000 : false),
   });
+  const drafting = !!q.data?.proposing?.running;
+  const draftError = !drafting ? q.data?.proposing?.error : undefined;
   const current = q.data?.houseView ?? null;
   const pending = q.data?.pending ?? null;
 
@@ -63,7 +68,7 @@ export function HouseViewPanel() {
 
   const propose = useMutation({
     mutationFn: async () => (await apiRequest("POST", "/api/house-view/propose", {})).json(),
-    onSuccess: () => { setDraft(null); setTrigger("approved proposal"); refresh(); toast({ title: "Draft ready", description: "Review, edit and approve it below." }); },
+    onSuccess: () => { setDraft(null); setTrigger("approved proposal"); refresh(); },
     onError: (e: any) => toast({ title: "Could not draft a view", description: e.message, variant: "destructive" }),
   });
   const save = useMutation({
@@ -101,15 +106,18 @@ export function HouseViewPanel() {
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
           )}
-          <Button size="sm" className="gap-1.5" onClick={() => propose.mutate()} disabled={propose.isPending}>
-            {propose.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          <Button size="sm" className="gap-1.5" onClick={() => propose.mutate()} disabled={propose.isPending || drafting}>
+            {propose.isPending || drafting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             Propose update
           </Button>
         </div>
       </div>
 
-      {propose.isPending && (
-        <div className="mb-3 text-xs text-muted-foreground">Drafting from the latest evidence. This can take a minute or two.</div>
+      {(propose.isPending || drafting) && (
+        <div className="mb-3 text-xs text-muted-foreground">Drafting from the latest evidence. This takes a few minutes, and you can leave this page open.</div>
+      )}
+      {draftError && (
+        <div className="mb-3 text-xs text-destructive">The last draft failed: {draftError}</div>
       )}
 
       {current && (

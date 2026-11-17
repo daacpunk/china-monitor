@@ -77,7 +77,7 @@ export async function proposeHouseView(modelArg?: LlmModel): Promise<ProposedHou
     systemPrompt: system,
     userPrompt: user,
     actionContext: "house_view_propose",
-    maxOutputTokens: 1200,
+    maxOutputTokens: 3500,
   });
 
   const obj = extractJsonObject(res.text) ?? {};
